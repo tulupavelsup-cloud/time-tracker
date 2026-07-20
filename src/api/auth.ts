@@ -8,7 +8,14 @@ import { supabase } from '../lib/supabase';
 
 /** Регистрация по email + паролю. Возвращает созданного пользователя. */
 export async function signUp(email: string, password: string): Promise<User> {
-  const { data, error } = await supabase.auth.signUp({ email, password });
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    // Ссылка подтверждения в письме должна вести обратно в трекер,
+    // а не на Site URL проекта (он общий с дашбордом и указывает не сюда).
+    // Адрес должен быть добавлен в Auth → URL Configuration → Redirect URLs.
+    options: { emailRedirectTo: window.location.origin },
+  });
   if (error) throw new Error(`Регистрация не удалась: ${error.message}`);
   if (!data.user) throw new Error('Регистрация не удалась: пользователь не создан');
   return data.user;
