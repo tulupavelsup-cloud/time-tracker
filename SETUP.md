@@ -1,39 +1,30 @@
 # SETUP — запуск тайм-трекера (для владельца проекта)
 
-Миграции НЕ применены автоматически (на этой машине нет ключей Supabase).
-Ниже — все шаги, чтобы поднять проект с нуля. Порядок важен.
+## 1. Ключи Supabase → .env — УЖЕ СДЕЛАНО (20.07.2026)
 
-## 1. Ключи Supabase → .env
+`.env` заполнен реальными значениями проекта `tnuyvummwzmucuezirtu` (тот же, что у дашборда):
+`VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` (publishable key). Там же лежит `SUPABASE_SECRET_KEY` —
+он НЕ попадает в сборку (нет префикса `VITE_`) и нужен только для админ-скриптов. `.env` в `.gitignore`.
 
-1. Открой [supabase.com/dashboard](https://supabase.com/dashboard), выбери проект.
-2. **Project Settings → API** (шестерёнка внизу слева):
-   - **Project URL** — вида `https://abcdefgh.supabase.co`;
-   - **anon / public key** (в новых проектах называется *Publishable key*).
-3. В корне репозитория открой файл `.env` (если его нет — скопируй `.env.example` в `.env`) и вставь значения:
+## 2. Применить схему БД (один раз) — ГЛАВНЫЙ ОСТАВШИЙСЯ ШАГ
 
-```
-VITE_SUPABASE_URL=https://abcdefgh.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJ...твой_ключ...
-```
-
-`.env` в `.gitignore` и в репозиторий не попадает. Ключ anon — публичный, но всё равно храним его только в `.env`.
-
-## 2. Применить схему БД (один раз)
+В облачном проекте таблицы `tt_categories` / `tt_tasks` / `tt_sessions` уже существуют (с данными),
+но в старой структуре — без колонок `theme`, `icon`, `duration_seconds`, `note`. Скрипт это учитывает:
+блок 000 в начале додаёт недостающие колонки, ничего не удаляя; данные дашборда не затрагиваются вовсе.
 
 1. В дашборде Supabase: **SQL Editor → New query**.
 2. Открой файл **`supabase/apply_all.sql`** из репозитория, скопируй ЦЕЛИКОМ, вставь в редактор и нажми **Run**.
-3. Скрипт идемпотентный — повторный запуск безопасен. Существующую функцию `tt_category_totals()` он НЕ перезаписывает (создаёт только если её нет).
-4. Проверка: **Table Editor** — должны появиться `tt_categories`, `tt_tasks`, `tt_sessions` (плюс уже существующие данные не трогаются). **Database → Functions** — `tt_task_totals`, `tt_today_totals`, `tt_stats`, `tt_category_totals`.
+3. Скрипт идемпотентный — повторный запуск безопасен. Существующую функцию `tt_category_totals()` он НЕ перезаписывает (создаёт только если её нет). Существующие строки в `tt_*` сохраняются (категориям без темы автоматически назначатся темы зон).
+4. Проверка: **Table Editor** — в `tt_categories` появились колонки `theme`/`icon`. **Database → Functions** — `tt_task_totals`, `tt_today_totals`, `tt_stats`, `tt_category_totals`.
 
-Те же миграции лежат по отдельности в `supabase/migrations/` (001–003) — на случай применения через Supabase CLI.
+Те же миграции лежат по отдельности в `supabase/migrations/` (000–003) — на случай применения через Supabase CLI.
 
-## 3. Отключить подтверждение email (чтобы вход был сразу)
+## 3. Подтверждение email — по желанию
 
-Приложение использует вход по email + паролю. Чтобы команде не ждать письма:
+Сейчас в проекте подтверждение ВКЛЮЧЕНО (проверено 20.07.2026): после регистрации придёт письмо со ссылкой, до клика войти нельзя (приложение честно об этом скажет). Так можно и оставить.
 
-1. **Authentication → Sign In / Up** (в старом интерфейсе: Authentication → Providers → Email).
-2. Найди переключатель **Confirm email** и **выключи** его.
-3. Сохрани.
+Если хочется вход сразу после регистрации: **Authentication → Sign In / Up → Confirm email → выключить**.
+Учти: настройка общая для всего Supabase-проекта, т.е. коснётся и дашборда, если тот регистрирует пользователей.
 
 ## 4. Проверить советников безопасности
 
@@ -68,11 +59,22 @@ npm run deploy
 
 Важно: переменные `VITE_*` вшиваются в сборку на этапе `npm run build`, поэтому `.env` должен быть заполнен ДО деплоя.
 
+## 7. Публикация на GitHub
+
+Репозиторий готов локально (ветка `main`). Чтобы выложить: на github.com нажми **New repository**,
+имя `time-tracker`, **без** README/.gitignore (пустой), затем в терминале из `e:\time-tracker`:
+
+```
+git remote add origin https://github.com/tulupavelsup-cloud/time-tracker.git
+git push -u origin main
+```
+
 ## Краткий чек-лист
 
-- [ ] `.env` заполнен (URL + anon key)
-- [ ] `supabase/apply_all.sql` выполнен в SQL Editor
-- [ ] Confirm email выключен (Authentication → Sign In / Up)
+- [x] `.env` заполнен (URL + publishable key) — сделано 20.07.2026
+- [ ] `supabase/apply_all.sql` выполнен в SQL Editor ← главный шаг
+- [ ] Confirm email: решить (сейчас включён; можно оставить)
 - [ ] Security Advisor чистый
 - [ ] `npx wrangler login` выполнен
 - [ ] `npm run deploy` — ссылка у Тимура
+- [ ] GitHub: создать пустой репозиторий и запушить
