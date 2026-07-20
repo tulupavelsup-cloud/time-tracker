@@ -139,7 +139,7 @@ export function StatsScreen() {
               {isActive && (
                 <motion.span
                   layoutId="period-pill"
-                  className="absolute inset-0 rounded-full bg-lime-300"
+                  className="absolute inset-0 rounded-full bg-white"
                   transition={{ type: 'spring', stiffness: 420, damping: 32 }}
                 />
               )}
@@ -156,7 +156,7 @@ export function StatsScreen() {
         <p className="text-xs font-medium uppercase tracking-wide text-emerald-900/60">
           {period === 'day' ? 'Сегодня' : period === 'week' ? 'За неделю' : 'За месяц'}
         </p>
-        <p className="mt-1 font-display text-4xl font-medium text-emerald-950">
+        <p className="mt-1 font-display text-[40px] font-light leading-tight text-emerald-950">
           {formatDuration(total)}
         </p>
       </div>

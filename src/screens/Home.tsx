@@ -166,7 +166,7 @@ export function HomeScreen({ onNavigate }: { onNavigate: (tab: Tab) => void }) {
         <p className="text-xs font-medium uppercase tracking-wide text-emerald-900/60">
           Сегодня в зачёте
         </p>
-        <p className="mt-1 font-display text-4xl font-medium text-emerald-950">
+        <p className="mt-1 font-display text-[40px] font-light leading-tight text-emerald-950">
           {formatDuration(todayTotal)}
         </p>
         {top3.length > 0 ? (

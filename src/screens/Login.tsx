@@ -71,7 +71,7 @@ export function LoginScreen() {
                 {isActive && (
                   <motion.span
                     layoutId="auth-pill"
-                    className="absolute inset-0 rounded-full bg-lime-300"
+                    className="absolute inset-0 rounded-full bg-white"
                     transition={{ type: 'spring', stiffness: 420, damping: 32 }}
                   />
                 )}

@@ -27,7 +27,7 @@ import { LoadingBlock } from '../ui/Spinner';
 import { ArrowLeftIcon } from '../ui/Icons';
 
 const R = 130; // радиус планеты, px
-const ZONE_LIFT = 24; // насколько зона приподнята над поверхностью
+const ZONE_LIFT = 35; // насколько зона приподнята над поверхностью
 
 interface Zone {
   cat: Category;
@@ -222,21 +222,77 @@ export function PlanetScreen() {
               height: R * 2,
               transform: `rotate(${rot}deg)`,
               background:
-                'radial-gradient(circle at 34% 30%, #55c26e 0%, #2f9152 38%, #1c6b3c 68%, #0e4527 100%)',
-              boxShadow:
-                '0 24px 70px rgba(3,26,15,0.6), inset -18px -24px 48px rgba(4,32,18,0.55), 0 0 0 10px rgba(216,243,107,0.06)',
+                'radial-gradient(circle at 34% 30%, #86dc96 0%, #4fb26a 40%, #2f9152 70%, #17643a 100%)',
+              boxShadow: '0 24px 70px rgba(3,26,15,0.55)',
             }}
           >
-            {/* Материки-пятна, крутятся вместе с планетой */}
-            <svg viewBox="0 0 260 260" className="h-full w-full opacity-70" aria-hidden="true">
-              <ellipse cx="82" cy="92" rx="34" ry="22" fill="#63c97c" opacity="0.55" />
-              <ellipse cx="180" cy="70" rx="26" ry="16" fill="#3fae62" opacity="0.5" />
-              <ellipse cx="150" cy="180" rx="42" ry="24" fill="#57bd72" opacity="0.45" />
-              <ellipse cx="60" cy="180" rx="20" ry="13" fill="#7fd694" opacity="0.4" />
-              <circle cx="200" cy="150" r="10" fill="#8fe3a3" opacity="0.35" />
-              <circle cx="110" cy="40" r="7" fill="#a9eab8" opacity="0.4" />
+            {/* Поверхность: материки-поляны, кроны, тропинки — крутятся с планетой */}
+            <svg viewBox="0 0 260 260" className="h-full w-full" aria-hidden="true">
+              <defs>
+                <clipPath id="planet-surface">
+                  <circle cx="130" cy="130" r="130" />
+                </clipPath>
+              </defs>
+              <g clipPath="url(#planet-surface)">
+                {/* Материки-поляны разных зелёных */}
+                <ellipse cx="80" cy="86" rx="46" ry="30" fill="#8fdc95" opacity="0.6" />
+                <ellipse cx="186" cy="66" rx="34" ry="22" fill="#5fbf74" opacity="0.6" />
+                <ellipse cx="152" cy="186" rx="52" ry="30" fill="#6cc57e" opacity="0.55" />
+                <ellipse cx="54" cy="178" rx="26" ry="17" fill="#a4e5ae" opacity="0.45" />
+                <ellipse cx="206" cy="152" rx="20" ry="13" fill="#b7edbe" opacity="0.4" />
+                <ellipse cx="126" cy="126" rx="24" ry="15" fill="#3f9e5c" opacity="0.5" />
+                {/* Тропинки между зонами */}
+                <path
+                  d="M 56 66 C 96 106, 164 112, 206 72"
+                  stroke="#e9e6c6" strokeWidth="5" strokeLinecap="round" fill="none" opacity="0.5"
+                />
+                <path
+                  d="M 66 202 C 108 162, 168 166, 206 198"
+                  stroke="#e9e6c6" strokeWidth="5" strokeLinecap="round" fill="none" opacity="0.45"
+                />
+                <path
+                  d="M 128 14 C 118 72, 142 178, 130 246"
+                  stroke="#f2efd4" strokeWidth="4" strokeLinecap="round" fill="none" opacity="0.3"
+                />
+                {/* Скопления мини-крон */}
+                {([
+                  [70, 118, 8], [84, 128, 6], [62, 132, 5],
+                  [178, 108, 8], [192, 118, 6],
+                  [112, 200, 7], [126, 210, 5], [100, 210, 5],
+                  [204, 190, 6], [216, 198, 5],
+                  [150, 52, 6], [162, 60, 5],
+                ] as [number, number, number][]).map(([x, y, r], i) => (
+                  <g key={i}>
+                    <circle cx={x + r * 0.22} cy={y + r * 0.3} r={r} fill="#14532d" opacity="0.32" />
+                    <circle cx={x} cy={y} r={r} fill="#2e8a4c" />
+                    <circle cx={x - r * 0.28} cy={y - r * 0.28} r={r * 0.55} fill="#5cbb74" />
+                  </g>
+                ))}
+              </g>
             </svg>
           </div>
+
+          {/* Свечение атмосферы и объём — не крутятся вместе с планетой */}
+          <div
+            className="pointer-events-none absolute inset-0 rounded-full"
+            style={{
+              boxShadow:
+                'inset 10px 14px 36px rgba(238,255,205,0.32), inset -22px -30px 54px rgba(3,30,16,0.55), 0 0 46px rgba(196,240,150,0.3), 0 0 0 10px rgba(216,243,107,0.07)',
+            }}
+          />
+          {/* Полупрозрачные облачка над поверхностью */}
+          <motion.div
+            className="pointer-events-none absolute left-[16%] top-[24%] h-4 w-14 rounded-full bg-white/40"
+            style={{ filter: 'blur(3px)' }}
+            animate={{ x: [0, 12, 0] }}
+            transition={{ repeat: Infinity, duration: 16, ease: 'easeInOut' }}
+          />
+          <motion.div
+            className="pointer-events-none absolute bottom-[22%] right-[14%] h-3.5 w-11 rounded-full bg-white/30"
+            style={{ filter: 'blur(3px)' }}
+            animate={{ x: [0, -10, 0] }}
+            transition={{ repeat: Infinity, duration: 19, ease: 'easeInOut' }}
+          />
 
           {/* Чувачок отдыхает в центре, когда сессии нет */}
           {!active && (
@@ -259,8 +315,8 @@ export function PlanetScreen() {
                 key={z.cat.id}
                 className="absolute left-1/2 top-1/2"
                 style={{
-                  width: 92,
-                  height: 70,
+                  width: 120,
+                  height: 92,
                   transform: `translate(-50%,-50%) rotate(${a}deg) translateY(-${R + ZONE_LIFT}px)`,
                 }}
               >

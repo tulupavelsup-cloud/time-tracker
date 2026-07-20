@@ -209,7 +209,7 @@ export function TimerScreen() {
         </svg>
         {/* Цифры на стекле */}
         <div className="glass-dark relative flex h-[186px] w-[186px] flex-col items-center justify-center !rounded-full text-center">
-          <p className="font-display text-[30px] font-medium tabular-nums text-white">
+          <p className="font-display text-[32px] font-light tabular-nums text-white">
             {formatClock(elapsed)}
           </p>
           {active ? (
@@ -331,7 +331,7 @@ export function TimerScreen() {
                   onClick={() => setSelectedTaskId(null)}
                   className={`rounded-full px-3.5 py-1.5 text-sm ${
                     selectedTaskId === null
-                      ? 'bg-lime-300 font-semibold text-emerald-950'
+                      ? 'bg-white font-semibold text-gray-900'
                       : 'glass-dark !rounded-full text-white/80'
                   }`}
                 >
@@ -345,7 +345,7 @@ export function TimerScreen() {
                     onClick={() => setSelectedTaskId(task.id)}
                     className={`rounded-full px-3.5 py-1.5 text-sm ${
                       selectedTaskId === task.id
-                        ? 'bg-lime-300 font-semibold text-emerald-950'
+                        ? 'bg-white font-semibold text-gray-900'
                         : 'glass-dark !rounded-full text-white/80'
                     }`}
                   >
@@ -379,7 +379,7 @@ export function TimerScreen() {
               <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-lime-300 text-emerald-950">
                 <SparkIcon className="h-7 w-7" />
               </span>
-              <p className="mt-4 font-display text-2xl font-medium text-lime-300">
+              <p className="mt-4 font-display text-3xl font-light text-lime-300">
                 +{party.minutes} мин
               </p>
               <p className="mt-2 text-sm text-white/85">

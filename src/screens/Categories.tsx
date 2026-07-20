@@ -449,7 +449,7 @@ export function CategoriesScreen() {
                         onClick={() => setForm({ ...form, theme: t.slug })}
                         className={`rounded-full px-3.5 py-1.5 text-sm ${
                           isActive
-                            ? 'bg-lime-300 font-semibold text-emerald-950'
+                            ? 'bg-white font-semibold text-gray-900'
                             : 'border border-white/20 text-white/75'
                         }`}
                       >
