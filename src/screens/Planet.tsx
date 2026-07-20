@@ -52,6 +52,8 @@ export function PlanetScreen() {
   const [opened, setOpened] = useState<Category | null>(null);
 
   const [rot, setRot] = useState(0);
+  const sceneRef = useRef<HTMLDivElement | null>(null);
+  const [sceneH, setSceneH] = useState(540);
   const rotRef = useRef(0);
   const draggingRef = useRef(false);
   const pressRef = useRef<{ id: number; x: number; y: number } | null>(null);
@@ -96,6 +98,16 @@ export function PlanetScreen() {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, [active]);
+
+  // Высота сцены — чтобы метки-пилюли зон не наезжали на строку-подсказку
+  useEffect(() => {
+    const el = sceneRef.current;
+    if (!el) return;
+    setSceneH(el.clientHeight);
+    const ro = new ResizeObserver(() => setSceneH(el.clientHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [loading]);
 
   const zones: Zone[] = useMemo(
     () =>
@@ -199,7 +211,7 @@ export function PlanetScreen() {
   const heroZoneId = active?.category_id ?? null;
 
   return (
-    <div className="relative h-full min-h-[540px] touch-none select-none overflow-hidden">
+    <div ref={sceneRef} className="relative h-full min-h-[540px] touch-none select-none overflow-hidden">
       {/* Сцена планеты */}
       <motion.div
         className="absolute inset-0"
@@ -356,7 +368,9 @@ export function PlanetScreen() {
             const a = ((z.angle + rot) * Math.PI) / 180;
             const dist = R + ZONE_LIFT + 44;
             const dx = Math.max(-122, Math.min(122, Math.sin(a) * dist));
-            const dy = -Math.cos(a) * dist;
+            // Клэмп сверху: пилюля не поднимается выше низа строки-подсказки
+            // (центр планеты — 46% высоты сцены, подсказка + зазор ≈ 60px)
+            const dy = Math.max(-(sceneH * 0.46 - 60), -Math.cos(a) * dist);
             const isHeroHere = heroZoneId === z.cat.id;
             return (
               <div
