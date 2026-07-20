@@ -1,0 +1,26 @@
+# dependencies
+node_modules/
+
+# build
+dist/
+dist-ssr/
+
+# environment / secrets
+.env
+.env.local
+.env.*.local
+
+# wrangler / cloudflare
+.wrangler/
+.dev.vars
+
+# logs
+*.log
+npm-debug.log*
+
+# editor / os
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
