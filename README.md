@@ -48,7 +48,7 @@ npx wrangler login
 npm run deploy
 ```
 
-Прод: (ссылка появится после деплоя)
+**Прод: https://time-tracker-7ux.pages.dev** (Cloudflare Pages, деплой 20.07.2026)
 
 ## Документация
 
