@@ -50,7 +50,7 @@ export function HomeScreen({ onNavigate }: { onNavigate: (tab: Tab) => void }) {
   const [active, setActive] = useState<Session | null>(null);
   const [last, setLast] = useState<Session | null>(null);
   const [busy, setBusy] = useState(false);
-  const [nowMs, setNowMs] = useState(Date.now());
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
     let cancelled = false;
@@ -117,11 +117,13 @@ export function HomeScreen({ onNavigate }: { onNavigate: (tab: Tab) => void }) {
 
   if (loading) return <LoadingBlock label="Собираем день…" />;
 
-  const dateText = new Date().toLocaleDateString('ru-RU', {
+  // «воскресенье, 20 июля» → с большой буквы только начало, месяц строчными
+  const rawDate = new Date().toLocaleDateString('ru-RU', {
     weekday: 'long',
     day: 'numeric',
     month: 'long',
   });
+  const dateText = rawDate.charAt(0).toUpperCase() + rawDate.slice(1);
   const activeCat = active ? categoryById.get(active.category_id) : null;
   const lastCat = last ? categoryById.get(last.category_id) : null;
   const lastTask = last?.task_id ? taskById.get(last.task_id) : null;
@@ -132,7 +134,7 @@ export function HomeScreen({ onNavigate }: { onNavigate: (tab: Tab) => void }) {
       {/* Приветствие */}
       <motion.div variants={item} className="px-1 pt-2">
         <h2 className="font-display text-2xl font-medium text-white">{greeting()}</h2>
-        <p className="mt-1 text-sm capitalize text-white/60">{dateText}</p>
+        <p className="mt-1 text-sm text-white/60">{dateText}</p>
       </motion.div>
 
       {/* Живая пилюля идущей сессии */}

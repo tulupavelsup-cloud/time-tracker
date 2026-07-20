@@ -67,6 +67,8 @@ export function CategoriesScreen() {
   }, [toast]);
 
   useEffect(() => {
+    // Стандартная загрузка данных при монтировании: setState придёт после await
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh();
   }, [refresh]);
 

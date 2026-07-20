@@ -30,11 +30,14 @@ interface ToastContextValue {
 
 const ToastContext = createContext<ToastContextValue>({ toast: () => {} });
 
+// Хук и helper живут рядом с провайдером сознательно: это единый модуль тостов
+// eslint-disable-next-line react-refresh/only-export-components
 export function useToast(): ToastContextValue {
   return useContext(ToastContext);
 }
 
 /** Достаёт человекочитаемый текст из ошибки API. */
+// eslint-disable-next-line react-refresh/only-export-components
 export function errorText(err: unknown): string {
   if (err instanceof Error) return err.message;
   return 'Что-то пошло не так. Попробуйте ещё раз.';

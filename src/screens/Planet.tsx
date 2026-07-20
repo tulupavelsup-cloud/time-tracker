@@ -48,12 +48,14 @@ export function PlanetScreen() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [totals, setTotals] = useState<Map<string, number>>(new Map());
   const [active, setActive] = useState<Session | null>(null);
-  const [nowMs, setNowMs] = useState(Date.now());
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [opened, setOpened] = useState<Category | null>(null);
 
   const [rot, setRot] = useState(0);
   const rotRef = useRef(0);
   const draggingRef = useRef(false);
+  const pressRef = useRef<{ id: number; x: number; y: number } | null>(null);
+  const movedRef = useRef(false);
   const lastXRef = useRef(0);
   const velRef = useRef(0);
   const rafRef = useRef<number | null>(null);
@@ -143,22 +145,40 @@ export function PlanetScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active?.id, zones.length]);
 
-  // Вращение пальцем/мышью + лёгкая инерция
+  // Вращение пальцем/мышью + лёгкая инерция.
+  // Важно: указатель НЕ захватываем на pointerdown, иначе click по зоне
+  // не доходит до кнопки. Захват и режим вращения включаем в pointermove
+  // после порога перемещения — чистый тап открывает интерьер зоны.
+  const DRAG_THRESHOLD = 6; // px, одинаково для мыши и touch
+
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
-    draggingRef.current = true;
+    pressRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    movedRef.current = false;
+    draggingRef.current = false;
     lastXRef.current = e.clientX;
     velRef.current = 0;
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    e.currentTarget.setPointerCapture(e.pointerId);
   }
   function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
-    if (!draggingRef.current) return;
+    const press = pressRef.current;
+    if (!press || press.id !== e.pointerId) return;
+    if (!draggingRef.current) {
+      const dist = Math.hypot(e.clientX - press.x, e.clientY - press.y);
+      if (dist < DRAG_THRESHOLD) return;
+      draggingRef.current = true;
+      movedRef.current = true;
+      lastXRef.current = e.clientX;
+      // Перехватываем указатель у кнопки зоны (в т.ч. неявный захват touch)
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
     const dx = e.clientX - lastXRef.current;
     lastXRef.current = e.clientX;
     velRef.current = dx;
     applyRot(rotRef.current + dx * 0.45);
   }
   function onPointerUp() {
+    pressRef.current = null;
+    if (!draggingRef.current) return;
     draggingRef.current = false;
     const spin = () => {
       velRef.current *= 0.94;
@@ -256,7 +276,11 @@ export function PlanetScreen() {
                 <button
                   type="button"
                   aria-label={`Зона «${z.cat.name}» — открыть`}
-                  onClick={() => setOpened(z.cat)}
+                  onClick={() => {
+                    // После вращения click на touch может долететь — глушим
+                    if (movedRef.current) return;
+                    setOpened(z.cat);
+                  }}
                   className="block h-full w-full"
                 >
                   <Exterior level={z.level} />

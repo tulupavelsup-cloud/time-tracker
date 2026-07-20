@@ -65,6 +65,8 @@ export function StatsScreen() {
   );
 
   useEffect(() => {
+    // Перезагрузка статистики при смене периода — осознанный fetch в эффекте
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load(period);
   }, [period, load]);
 
