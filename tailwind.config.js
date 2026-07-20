@@ -2,7 +2,12 @@
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
-    extend: {},
+    extend: {
+      fontFamily: {
+        sans: ['"Golos Text"', 'system-ui', 'sans-serif'],
+        display: ['Unbounded', '"Golos Text"', 'sans-serif'],
+      },
+    },
   },
   plugins: [],
 };
