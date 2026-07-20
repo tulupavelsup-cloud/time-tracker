@@ -1,14 +1,21 @@
 /**
- * Экран входа: email + пароль, одна форма с переключателем «Вход / Регистрация».
- * Успешный вход подхватит onAuthStateChange в App.
+ * Экран входа (стекло, этап 2): сцена на фоне, тёмная стеклянная карточка,
+ * пилюльный сегмент «Вход / Регистрация» со скользящей пилюлей (layoutId).
  */
 
 import { useState, type FormEvent } from 'react';
+import { motion } from 'framer-motion';
 import { signIn, signUp } from '../api';
 import { errorText, useToast } from '../ui/Toast';
 import { Spinner } from '../ui/Spinner';
+import { Scene } from '../ui/Scene';
 
 type Mode = 'signin' | 'signup';
+
+const MODES: { value: Mode; label: string }[] = [
+  { value: 'signin', label: 'Вход' },
+  { value: 'signup', label: 'Регистрация' },
+];
 
 export function LoginScreen() {
   const { toast } = useToast();
@@ -35,36 +42,50 @@ export function LoginScreen() {
     }
   }
 
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-100 p-6">
-      <div className="w-full max-w-sm">
-        <h1 className="font-display text-2xl font-semibold">Тайм-трекер</h1>
-        <p className="mt-1 text-sm text-gray-500">Каждая минута — в зачёт.</p>
+  const inputClass =
+    'mt-1 w-full rounded-2xl border border-white/15 bg-white/10 px-3 py-2.5 text-base text-white placeholder-white/35 outline-none focus:border-lime-300/70';
 
-        <div className="mt-6 flex rounded-xl bg-gray-200 p-1 text-sm font-medium">
-          <button
-            type="button"
-            onClick={() => setMode('signin')}
-            className={`flex-1 rounded-lg py-2 ${
-              mode === 'signin' ? 'bg-white shadow-sm' : 'text-gray-500'
-            }`}
-          >
-            Вход
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('signup')}
-            className={`flex-1 rounded-lg py-2 ${
-              mode === 'signup' ? 'bg-white shadow-sm' : 'text-gray-500'
-            }`}
-          >
-            Регистрация
-          </button>
+  return (
+    <div className="relative flex min-h-dvh items-center justify-center p-6">
+      <Scene />
+      <motion.div
+        className="glass-dark w-full max-w-sm p-6"
+        initial={{ opacity: 0, y: 24 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 220, damping: 24 }}
+      >
+        <h1 className="font-display text-2xl font-medium text-white">Тайм-трекер</h1>
+        <p className="mt-1 text-sm text-white/60">Каждая минута — в зачёт.</p>
+
+        <div className="mt-6 flex rounded-full border border-white/15 bg-white/5 p-1 text-sm font-medium">
+          {MODES.map((m) => {
+            const isActive = mode === m.value;
+            return (
+              <motion.button
+                key={m.value}
+                type="button"
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setMode(m.value)}
+                className="relative flex-1 rounded-full py-2"
+              >
+                {isActive && (
+                  <motion.span
+                    layoutId="auth-pill"
+                    className="absolute inset-0 rounded-full bg-lime-300"
+                    transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                  />
+                )}
+                <span className={`relative ${isActive ? 'font-semibold text-emerald-950' : 'text-white/65'}`}>
+                  {m.label}
+                </span>
+              </motion.button>
+            );
+          })}
         </div>
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-3">
           <label className="block">
-            <span className="text-xs font-medium text-gray-500">Почта</span>
+            <span className="text-xs font-medium text-white/55">Почта</span>
             <input
               type="email"
               required
@@ -72,11 +93,11 @@ export function LoginScreen() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
-              className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-base outline-none focus:border-emerald-500"
+              className={inputClass}
             />
           </label>
           <label className="block">
-            <span className="text-xs font-medium text-gray-500">Пароль</span>
+            <span className="text-xs font-medium text-white/55">Пароль</span>
             <input
               type="password"
               required
@@ -85,19 +106,20 @@ export function LoginScreen() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Минимум 6 символов"
-              className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-base outline-none focus:border-emerald-500"
+              className={inputClass}
             />
           </label>
-          <button
+          <motion.button
             type="submit"
+            whileTap={{ scale: 0.96 }}
             disabled={busy}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 font-semibold text-white disabled:opacity-60"
+            className="flex w-full items-center justify-center gap-2 rounded-3xl bg-lime-300 py-3.5 font-display text-sm font-medium text-emerald-950 disabled:opacity-60"
           >
-            {busy && <Spinner className="h-4 w-4 text-white" />}
+            {busy && <Spinner className="h-4 w-4 text-emerald-950" />}
             {mode === 'signup' ? 'Создать аккаунт' : 'Войти'}
-          </button>
+          </motion.button>
         </form>
-      </div>
+      </motion.div>
     </div>
   );
 }

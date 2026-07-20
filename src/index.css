@@ -4,6 +4,23 @@
 
 @layer base {
   body {
-    @apply bg-gray-100 font-sans text-gray-900 antialiased;
+    @apply bg-[#0b3b26] font-sans text-white antialiased;
+  }
+}
+
+@layer components {
+  /* Тёмное дымчатое стекло (нижние панели, таб-бар) */
+  .glass-dark {
+    @apply rounded-3xl border border-white/15 bg-[#062418]/55 backdrop-blur-xl;
+    box-shadow: 0 8px 32px rgba(2, 24, 14, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  }
+  /* Светлое матовое стекло (карточки-метрики) */
+  .glass-light {
+    @apply rounded-3xl border border-white/45 bg-white/70 text-gray-900 backdrop-blur-xl;
+    box-shadow: 0 8px 28px rgba(6, 40, 24, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  }
+  /* Белая пилюля-метка на сцене (как «156 yd») */
+  .scene-pill {
+    @apply rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-900 shadow-md;
   }
 }

@@ -1,11 +1,13 @@
 /**
- * Экран «Статистика»: сегмент-контрол День/Неделя/Месяц -> getStats(period).
- * Общий итог, столбчатый график по категориям (чистые div-бары), список
- * категорий с процентами (включая нули), разрез по задачам и блок
- * прогресса зон: накопленное время против порогов из lib/thresholds.
+ * Экран «Статистика» (стекло, этап 2): пилюльный сегмент День/Неделя/Месяц
+ * (активная пилюля скользит через layoutId), крупный итог Unbounded,
+ * график со скруглёнными столбцами и анимированным наполнением,
+ * полосы категорий с процентами, разрез по задачам, прогресс зон.
+ * Логика данных — как в этапе 1 (getStats + tt_category_totals).
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
 import {
   getCategories,
   getCategoryTotals,
@@ -119,105 +121,134 @@ export function StatsScreen() {
   const maxSeconds = Math.max(1, ...categoryRows.map((r) => r.seconds));
 
   return (
-    <div className="space-y-5 p-4">
-      {/* Сегмент-контрол периода */}
-      <div className="flex rounded-xl bg-gray-200 p-1 text-sm font-medium">
-        {PERIODS.map((p) => (
-          <button
-            key={p.value}
-            type="button"
-            onClick={() => setPeriod(p.value)}
-            className={`flex-1 rounded-lg py-2 ${
-              period === p.value ? 'bg-white shadow-sm' : 'text-gray-500'
-            }`}
-          >
-            {p.label}
-          </button>
-        ))}
+    <div className="space-y-4 p-4">
+      {/* Пилюльный сегмент-контрол периода */}
+      <div className="glass-dark flex !rounded-full p-1 text-sm font-medium">
+        {PERIODS.map((p) => {
+          const isActive = period === p.value;
+          return (
+            <motion.button
+              key={p.value}
+              type="button"
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setPeriod(p.value)}
+              className="relative flex-1 rounded-full py-2"
+            >
+              {isActive && (
+                <motion.span
+                  layoutId="period-pill"
+                  className="absolute inset-0 rounded-full bg-lime-300"
+                  transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                />
+              )}
+              <span className={`relative ${isActive ? 'font-semibold text-emerald-950' : 'text-white/65'}`}>
+                {p.label}
+              </span>
+            </motion.button>
+          );
+        })}
       </div>
 
       {/* Общий итог */}
-      <div className="rounded-2xl bg-white p-5 text-center shadow-sm">
-        <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
+      <div className="glass-light p-5 text-center">
+        <p className="text-xs font-medium uppercase tracking-wide text-emerald-900/60">
           {period === 'day' ? 'Сегодня' : period === 'week' ? 'За неделю' : 'За месяц'}
         </p>
-        <p className="mt-1 font-display text-3xl font-semibold">{formatDuration(total)}</p>
+        <p className="mt-1 font-display text-4xl font-medium text-emerald-950">
+          {formatDuration(total)}
+        </p>
       </div>
 
-      {/* Столбчатый график по категориям */}
+      {/* График со скруглёнными столбцами */}
       {categoryRows.some((r) => r.seconds > 0) ? (
-        <div className="rounded-2xl bg-white p-4 shadow-sm">
-          <h2 className="mb-3 text-sm font-semibold text-gray-500">По категориям</h2>
-          <div className="flex h-32 items-end gap-2">
+        <div className="glass-dark p-4">
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-white/50">
+            По категориям
+          </h2>
+          <div className="flex items-end gap-2.5">
             {categoryRows.map((row) => (
               <div key={row.id} className="flex min-w-0 flex-1 flex-col items-center gap-1">
-                <div className="flex w-full flex-1 items-end">
-                  <div
-                    className="w-full rounded-t-md"
-                    style={{
-                      backgroundColor: row.color,
-                      height: `${Math.max(row.seconds > 0 ? 6 : 2, Math.round((row.seconds / maxSeconds) * 100))}%`,
-                      opacity: row.seconds > 0 ? 1 : 0.25,
-                    }}
-                  />
-                </div>
-                <span className="w-full truncate text-center text-[10px] text-gray-500">
+                <motion.div
+                  className="w-full rounded-t-xl rounded-b-md"
+                  style={{ backgroundColor: row.color, opacity: row.seconds > 0 ? 1 : 0.25 }}
+                  initial={{ height: 4 }}
+                  animate={{
+                    height: Math.max(row.seconds > 0 ? 10 : 4, Math.round((row.seconds / maxSeconds) * 104)),
+                  }}
+                  transition={{ type: 'spring', stiffness: 140, damping: 20 }}
+                />
+                <span className="w-full truncate text-center text-[10px] text-white/55">
                   {row.name}
                 </span>
               </div>
             ))}
           </div>
 
-          {/* Список с временем и процентами (включая нули) */}
-          <ul className="mt-4 space-y-2">
+          {/* Полосы категорий с процентами */}
+          <ul className="mt-4 space-y-3">
             {categoryRows.map((row) => (
-              <li key={row.id} className="flex items-center gap-2 text-sm">
-                <span
-                  className="h-2.5 w-2.5 shrink-0 rounded-full"
-                  style={{ backgroundColor: row.color }}
-                />
-                <span className="min-w-0 flex-1 truncate">{row.name}</span>
-                <span className="tabular-nums text-gray-600">{formatDuration(row.seconds)}</span>
-                <span className="w-10 text-right tabular-nums text-xs text-gray-400">
-                  {percentOf(row.seconds, total)}%
-                </span>
+              <li key={row.id}>
+                <div className="flex items-center gap-2 text-sm text-white/90">
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: row.color }}
+                  />
+                  <span className="min-w-0 flex-1 truncate">{row.name}</span>
+                  <span className="tabular-nums text-white/70">{formatDuration(row.seconds)}</span>
+                  <span className="w-10 text-right tabular-nums text-xs text-white/45">
+                    {percentOf(row.seconds, total)}%
+                  </span>
+                </div>
+                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-white/10">
+                  <motion.div
+                    className="h-full rounded-full"
+                    style={{ backgroundColor: row.color }}
+                    initial={{ width: 0 }}
+                    animate={{ width: `${percentOf(row.seconds, total)}%` }}
+                    transition={{ type: 'spring', stiffness: 120, damping: 22, delay: 0.1 }}
+                  />
+                </div>
               </li>
             ))}
           </ul>
         </div>
       ) : (
-        <div className="rounded-2xl bg-white p-5 text-center text-sm text-gray-500 shadow-sm">
+        <div className="glass-dark p-5 text-center text-sm text-white/65">
           Пока пусто. Запустите таймер — и здесь появятся первые столбики.
         </div>
       )}
 
       {/* Разрез по задачам */}
       {taskRows.length > 0 && (
-        <div className="rounded-2xl bg-white p-4 shadow-sm">
-          <h2 className="mb-3 text-sm font-semibold text-gray-500">По задачам</h2>
+        <div className="glass-dark p-4">
+          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-white/50">
+            По задачам
+          </h2>
           <ul className="space-y-2">
             {taskRows.map((row) => (
-              <li key={row.id} className="flex items-center gap-2 text-sm">
+              <li key={row.id} className="flex items-center gap-2 text-sm text-white/90">
                 <span
                   className="h-2.5 w-2.5 shrink-0 rounded-full"
                   style={{ backgroundColor: row.color }}
                 />
                 <span className="min-w-0 flex-1 truncate">
                   {row.name}
-                  <span className="text-gray-400"> · {row.categoryName}</span>
+                  <span className="text-white/45"> · {row.categoryName}</span>
                 </span>
-                <span className="tabular-nums text-gray-600">{formatDuration(row.seconds)}</span>
+                <span className="tabular-nums text-white/70">{formatDuration(row.seconds)}</span>
               </li>
             ))}
           </ul>
         </div>
       )}
 
-      {/* Прогресс зон (задел под планету): всё время против порогов */}
+      {/* Прогресс зон планеты: всё время против порогов */}
       {categories.length > 0 && (
-        <div className="rounded-2xl bg-white p-4 shadow-sm">
-          <h2 className="mb-1 text-sm font-semibold text-gray-500">Прогресс зон</h2>
-          <p className="mb-3 text-xs text-gray-400">Накоплено за всё время, растит вашу планету.</p>
+        <div className="glass-dark p-4">
+          <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-white/50">
+            Прогресс зон
+          </h2>
+          <p className="mb-3 text-xs text-white/45">Накоплено за всё время, растит вашу планету.</p>
           <ul className="space-y-4">
             {categories.map((cat) => {
               const seconds = allTimeByCategory.get(cat.id) ?? 0;
@@ -227,29 +258,29 @@ export function StatsScreen() {
               const theme = getTheme(cat.theme);
               return (
                 <li key={cat.id}>
-                  <div className="flex items-center gap-2 text-sm">
+                  <div className="flex items-center gap-2 text-sm text-white/90">
                     <span
                       className="h-2.5 w-2.5 shrink-0 rounded-full"
                       style={{ backgroundColor: categoryColor(cat.color) }}
                     />
                     <span className="min-w-0 flex-1 truncate font-medium">
                       {cat.name}
-                      {theme && <span className="text-gray-400"> · {theme.title}</span>}
+                      {theme && <span className="text-white/45"> · {theme.title}</span>}
                     </span>
-                    <span className="tabular-nums text-xs text-gray-500">
+                    <span className="tabular-nums text-xs text-white/60">
                       {formatDuration(seconds)}
                     </span>
                   </div>
-                  <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-gray-100">
-                    <div
+                  <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-white/10">
+                    <motion.div
                       className="h-full rounded-full"
-                      style={{
-                        width: `${Math.round(progress * 100)}%`,
-                        backgroundColor: categoryColor(cat.color),
-                      }}
+                      style={{ backgroundColor: categoryColor(cat.color) }}
+                      initial={{ width: 0 }}
+                      animate={{ width: `${Math.round(progress * 100)}%` }}
+                      transition={{ type: 'spring', stiffness: 120, damping: 22 }}
                     />
                   </div>
-                  <p className="mt-1 text-xs text-gray-400">
+                  <p className="mt-1 text-xs text-white/45">
                     Уровень: {level.title}
                     {next
                       ? ` · до «${next.title}» — ${formatHours(next.minHours)} всего`

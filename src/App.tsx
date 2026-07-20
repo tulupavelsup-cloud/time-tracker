@@ -1,34 +1,54 @@
 /**
- * Корень приложения: заглушка без ключей Supabase -> логин -> три вкладки
- * (Таймер / Статистика / Категории) простым стейтом, без роутера.
- * Вкладки размонтируются при переключении — каждая перезапрашивает данные
- * при открытии (статистика видит идущую сессию сразу).
+ * Корень приложения (этап 2): живая зелёная сцена + стеклянный интерфейс.
+ * 5 вкладок (Домой / Таймер / Статистика / Планета / Категории) в плавающем
+ * стеклянном таб-баре; активная — лаймовая пилюля (layoutId), экраны въезжают
+ * через AnimatePresence. Демо-режим (?demo=1) работает без Supabase и логина.
  */
 
 import { useEffect, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
-import { getUser, onAuthStateChange, signOut } from './api';
+import { AnimatePresence, motion } from 'framer-motion';
+import { IS_DEMO, getUser, onAuthStateChange, signOut } from './api';
 import { isSupabaseConfigured } from './lib/supabase';
 import { NotConfigured } from './screens/NotConfigured';
 import { LoginScreen } from './screens/Login';
+import { HomeScreen } from './screens/Home';
 import { TimerScreen } from './screens/Timer';
 import { StatsScreen } from './screens/Stats';
+import { PlanetScreen } from './screens/Planet';
 import { CategoriesScreen } from './screens/Categories';
 import { ToastProvider, errorText, useToast } from './ui/Toast';
+import { Scene } from './ui/Scene';
 import { LoadingBlock } from './ui/Spinner';
-import { ChartIcon, FolderIcon, LogoutIcon, TimerIcon } from './ui/Icons';
+import {
+  ChartIcon,
+  FolderIcon,
+  HomeIcon,
+  LogoutIcon,
+  PlanetIcon,
+  TimerIcon,
+} from './ui/Icons';
 
-type Tab = 'timer' | 'stats' | 'categories';
+export type Tab = 'home' | 'timer' | 'stats' | 'planet' | 'categories';
 
 const TABS: { id: Tab; label: string; icon: typeof TimerIcon }[] = [
+  { id: 'home', label: 'Домой', icon: HomeIcon },
   { id: 'timer', label: 'Таймер', icon: TimerIcon },
   { id: 'stats', label: 'Статистика', icon: ChartIcon },
+  { id: 'planet', label: 'Планета', icon: PlanetIcon },
   { id: 'categories', label: 'Категории', icon: FolderIcon },
 ];
 
+/** Начальная вкладка из ?tab= (удобно для QA-скриншотов), иначе «Домой». */
+function initialTab(): Tab {
+  if (typeof window === 'undefined') return 'home';
+  const t = new URLSearchParams(window.location.search).get('tab');
+  return TABS.some((x) => x.id === t) ? (t as Tab) : 'home';
+}
+
 function Shell({ user }: { user: User }) {
   const { toast } = useToast();
-  const [tab, setTab] = useState<Tab>('timer');
+  const [tab, setTab] = useState<Tab>(initialTab);
 
   async function handleSignOut() {
     try {
@@ -39,43 +59,85 @@ function Shell({ user }: { user: User }) {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-[430px] flex-col bg-gray-100">
-      <header className="flex items-center gap-3 px-4 pb-2 pt-4">
+    <div className="relative mx-auto flex min-h-dvh max-w-[430px] flex-col">
+      <Scene blurred={tab === 'timer'} />
+
+      <header className="flex items-center gap-3 px-5 pb-1 pt-4">
         <div className="min-w-0 flex-1">
-          <h1 className="font-display text-lg font-semibold">Тайм-трекер</h1>
-          <p className="truncate text-xs text-gray-400">{user.email}</p>
+          <div className="flex items-center gap-2">
+            <h1 className="font-display text-base font-semibold text-white">Тайм-трекер</h1>
+            {IS_DEMO && (
+              <span className="rounded-full bg-lime-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-950">
+                Демо
+              </span>
+            )}
+          </div>
+          <p className="truncate text-[11px] text-white/50">{user.email}</p>
         </div>
-        <button
+        <motion.button
           type="button"
+          whileTap={{ scale: 0.88 }}
           onClick={() => void handleSignOut()}
           aria-label="Выйти из аккаунта"
-          className="flex items-center gap-1.5 rounded-lg p-2 text-sm text-gray-500 active:bg-gray-200"
+          className="glass-dark flex h-10 w-10 items-center justify-center !rounded-2xl text-white/70"
         >
           <LogoutIcon />
-        </button>
+        </motion.button>
       </header>
 
-      <main className="flex-1 pb-24">
-        {tab === 'timer' && <TimerScreen />}
-        {tab === 'stats' && <StatsScreen />}
-        {tab === 'categories' && <CategoriesScreen />}
+      <main className="flex flex-1 flex-col pb-[calc(96px+env(safe-area-inset-bottom))]">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={tab}
+            className="flex flex-1 flex-col"
+            initial={{ opacity: 0, x: 28 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -28 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+          >
+            {tab === 'home' && <HomeScreen onNavigate={setTab} />}
+            {tab === 'timer' && <TimerScreen />}
+            {tab === 'stats' && <StatsScreen />}
+            {tab === 'planet' && <PlanetScreen />}
+            {tab === 'categories' && <CategoriesScreen />}
+          </motion.div>
+        </AnimatePresence>
       </main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-30 mx-auto max-w-[430px] border-t border-gray-200 bg-white">
-        <div className="flex">
-          {TABS.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setTab(id)}
-              className={`flex flex-1 flex-col items-center gap-0.5 py-2.5 text-[11px] font-medium ${
-                tab === id ? 'text-emerald-700' : 'text-gray-400'
-              }`}
-            >
-              <Icon className="h-6 w-6" />
-              {label}
-            </button>
-          ))}
+      {/* Плавающий стеклянный таб-бар */}
+      <nav
+        className="fixed inset-x-0 z-30 mx-auto w-full max-w-[430px] px-3"
+        style={{ bottom: 'calc(10px + env(safe-area-inset-bottom))' }}
+      >
+        <div className="glass-dark flex items-stretch px-1.5 py-1.5">
+          {TABS.map(({ id, label, icon: Icon }) => {
+            const isActive = tab === id;
+            return (
+              <motion.button
+                key={id}
+                type="button"
+                whileTap={{ scale: 0.92 }}
+                onClick={() => setTab(id)}
+                className="relative flex flex-1 flex-col items-center gap-0.5 rounded-2xl py-2 text-[10px] font-medium"
+              >
+                {isActive && (
+                  <motion.span
+                    layoutId="tab-pill"
+                    className="absolute inset-0 rounded-2xl bg-lime-300"
+                    transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                  />
+                )}
+                <span
+                  className={`relative flex flex-col items-center gap-0.5 ${
+                    isActive ? 'text-emerald-950' : 'text-white/60'
+                  }`}
+                >
+                  <Icon className="h-5 w-5" />
+                  {label}
+                </span>
+              </motion.button>
+            );
+          })}
         </div>
       </nav>
     </div>
@@ -102,7 +164,8 @@ function AuthGate() {
 
   if (user === undefined) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-100">
+      <div className="relative flex min-h-dvh items-center justify-center">
+        <Scene />
         <LoadingBlock label="Проверяем вход…" />
       </div>
     );
@@ -112,7 +175,8 @@ function AuthGate() {
 }
 
 function App() {
-  if (!isSupabaseConfigured) return <NotConfigured />;
+  // В демо-режиме Supabase не нужен вовсе
+  if (!isSupabaseConfigured && !IS_DEMO) return <NotConfigured />;
   return (
     <ToastProvider>
       <AuthGate />

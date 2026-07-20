@@ -1,16 +1,19 @@
 /**
- * Экран «Категории»: CRUD категорий (имя + цвет из палитры + тема зоны)
- * и задач внутри. Удаление = архивация с undo-тостом. Форма категории —
- * простая нижняя панель, задачи редактируются инлайн.
+ * Экран «Категории» (стекло, этап 2): карточки с цветом, темой зоны,
+ * суммарным временем и уровнем; задачи внутри. Создание/редактирование —
+ * стеклянный bottom-sheet (framer-motion выезд снизу). Удаление —
+ * архивация с undo-тостом.
  */
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   archiveCategory,
   archiveTask,
   createCategory,
   createTask,
   getCategories,
+  getCategoryTotals,
   getTasks,
   updateCategory,
   updateTask,
@@ -20,6 +23,8 @@ import {
 } from '../api';
 import { CATEGORY_COLORS, DEFAULT_CATEGORY_COLOR, categoryColor } from '../lib/palette';
 import { THEMES, getTheme, suggestTheme } from '../lib/themes';
+import { getZoneLevel } from '../lib/thresholds';
+import { formatDuration } from '../lib/format';
 import { errorText, useToast } from '../ui/Toast';
 import { LoadingBlock, Spinner } from '../ui/Spinner';
 import { ArchiveIcon, CheckIcon, CloseIcon, PencilIcon, PlusIcon } from '../ui/Icons';
@@ -36,6 +41,7 @@ export function CategoriesScreen() {
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<Category[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [totals, setTotals] = useState<Map<string, number>>(new Map());
   const [form, setForm] = useState<CategoryFormState | null>(null);
   const [busy, setBusy] = useState(false);
   const [newTaskFor, setNewTaskFor] = useState<string | null>(null);
@@ -45,9 +51,14 @@ export function CategoriesScreen() {
 
   const refresh = useCallback(async () => {
     try {
-      const [cats, allTasks] = await Promise.all([getCategories(), getTasks()]);
+      const [cats, allTasks, catTotals] = await Promise.all([
+        getCategories(),
+        getTasks(),
+        getCategoryTotals(),
+      ]);
       setCategories(cats);
       setTasks(allTasks);
+      setTotals(new Map(catTotals.map((t) => [t.category_id, t.total_seconds])));
     } catch (err) {
       toast(errorText(err));
     } finally {
@@ -177,19 +188,29 @@ export function CategoriesScreen() {
 
   if (loading) return <LoadingBlock />;
 
+  const inputClass =
+    'w-full rounded-2xl border border-white/15 bg-white/10 px-3 py-2.5 text-base text-white placeholder-white/35 outline-none focus:border-lime-300/70';
+
   return (
-    <div className="space-y-4 p-4">
-      <button
+    <motion.div
+      className="space-y-3.5 p-4"
+      initial="hidden"
+      animate="show"
+      variants={{ hidden: {}, show: { transition: { staggerChildren: 0.06 } } }}
+    >
+      <motion.button
         type="button"
+        variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}
+        whileTap={{ scale: 0.96 }}
         onClick={openCreate}
-        className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 font-semibold text-white"
+        className="flex w-full items-center justify-center gap-2 rounded-3xl bg-lime-300 py-3.5 font-display text-sm font-medium text-emerald-950 shadow-lg"
       >
         <PlusIcon />
         Новая категория
-      </button>
+      </motion.button>
 
       {categories.length === 0 && (
-        <div className="rounded-2xl bg-white p-6 text-center text-sm text-gray-500 shadow-sm">
+        <div className="glass-dark p-6 text-center text-sm text-white/65">
           Категорий пока нет. Создайте первую — например, «Саморазвитие».
         </div>
       )}
@@ -197,33 +218,49 @@ export function CategoriesScreen() {
       {categories.map((cat) => {
         const catTasks = tasksByCategory.get(cat.id) ?? [];
         const theme = getTheme(cat.theme);
+        const seconds = totals.get(cat.id) ?? 0;
+        const level = getZoneLevel(seconds);
         return (
-          <div key={cat.id} className="rounded-2xl bg-white p-4 shadow-sm">
+          <motion.div
+            key={cat.id}
+            variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}
+            className="glass-dark p-4"
+          >
             <div className="flex items-center gap-3">
               <span
-                className="h-3.5 w-3.5 shrink-0 rounded-full"
-                style={{ backgroundColor: categoryColor(cat.color) }}
-              />
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl"
+                style={{ backgroundColor: `${categoryColor(cat.color)}33` }}
+              >
+                <span
+                  className="h-3.5 w-3.5 rounded-full"
+                  style={{ backgroundColor: categoryColor(cat.color) }}
+                />
+              </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate font-medium">{cat.name}</p>
-                {theme && <p className="text-xs text-gray-400">Бизнес: {theme.title}</p>}
+                <p className="truncate font-medium text-white">{cat.name}</p>
+                <p className="text-xs text-white/50">
+                  {theme ? `${theme.title} · ` : ''}
+                  {level.title} · {formatDuration(seconds)}
+                </p>
               </div>
-              <button
+              <motion.button
                 type="button"
+                whileTap={{ scale: 0.88 }}
                 aria-label={`Редактировать «${cat.name}»`}
                 onClick={() => openEdit(cat)}
-                className="rounded-lg p-2 text-gray-400 active:bg-gray-100"
+                className="rounded-xl p-2 text-white/45"
               >
                 <PencilIcon />
-              </button>
-              <button
+              </motion.button>
+              <motion.button
                 type="button"
+                whileTap={{ scale: 0.88 }}
                 aria-label={`Архивировать «${cat.name}»`}
                 onClick={() => void handleArchiveCategory(cat)}
-                className="rounded-lg p-2 text-gray-400 active:bg-gray-100"
+                className="rounded-xl p-2 text-white/45"
               >
                 <ArchiveIcon />
-              </button>
+              </motion.button>
             </div>
 
             {/* Задачи категории */}
@@ -239,48 +276,46 @@ export function CategoriesScreen() {
                         autoFocus
                         value={editTaskName}
                         onChange={(e) => setEditTaskName(e.target.value)}
-                        className="min-w-0 flex-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-500"
+                        className={`min-w-0 flex-1 ${inputClass} !py-1.5 text-sm`}
                       />
-                      <button
-                        type="submit"
-                        aria-label="Сохранить задачу"
-                        className="rounded-lg p-2 text-emerald-600"
-                      >
+                      <button type="submit" aria-label="Сохранить задачу" className="rounded-xl p-2 text-lime-300">
                         <CheckIcon />
                       </button>
                       <button
                         type="button"
                         aria-label="Отменить"
                         onClick={() => setEditTaskId(null)}
-                        className="rounded-lg p-2 text-gray-400"
+                        className="rounded-xl p-2 text-white/45"
                       >
                         <CloseIcon />
                       </button>
                     </form>
                   </li>
                 ) : (
-                  <li key={task.id} className="flex items-center gap-2 text-sm">
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-gray-300" />
+                  <li key={task.id} className="flex items-center gap-2 text-sm text-white/85">
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-white/30" />
                     <span className="min-w-0 flex-1 truncate">{task.name}</span>
-                    <button
+                    <motion.button
                       type="button"
+                      whileTap={{ scale: 0.85 }}
                       aria-label={`Редактировать задачу «${task.name}»`}
                       onClick={() => {
                         setEditTaskId(task.id);
                         setEditTaskName(task.name);
                       }}
-                      className="rounded-lg p-1.5 text-gray-400 active:bg-gray-100"
+                      className="rounded-lg p-1.5 text-white/40"
                     >
                       <PencilIcon className="h-3.5 w-3.5" />
-                    </button>
-                    <button
+                    </motion.button>
+                    <motion.button
                       type="button"
+                      whileTap={{ scale: 0.85 }}
                       aria-label={`Архивировать задачу «${task.name}»`}
                       onClick={() => void handleArchiveTask(task)}
-                      className="rounded-lg p-1.5 text-gray-400 active:bg-gray-100"
+                      className="rounded-lg p-1.5 text-white/40"
                     >
                       <ArchiveIcon className="h-3.5 w-3.5" />
-                    </button>
+                    </motion.button>
                   </li>
                 ),
               )}
@@ -296,13 +331,9 @@ export function CategoriesScreen() {
                   value={newTaskName}
                   onChange={(e) => setNewTaskName(e.target.value)}
                   placeholder="Название задачи"
-                  className="min-w-0 flex-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm outline-none focus:border-emerald-500"
+                  className={`min-w-0 flex-1 ${inputClass} !py-1.5 text-sm`}
                 />
-                <button
-                  type="submit"
-                  aria-label="Добавить задачу"
-                  className="rounded-lg p-2 text-emerald-600"
-                >
+                <button type="submit" aria-label="Добавить задачу" className="rounded-xl p-2 text-lime-300">
                   <CheckIcon />
                 </button>
                 <button
@@ -312,110 +343,137 @@ export function CategoriesScreen() {
                     setNewTaskFor(null);
                     setNewTaskName('');
                   }}
-                  className="rounded-lg p-2 text-gray-400"
+                  className="rounded-xl p-2 text-white/45"
                 >
                   <CloseIcon />
                 </button>
               </form>
             ) : (
-              <button
+              <motion.button
                 type="button"
+                whileTap={{ scale: 0.95 }}
                 onClick={() => {
                   setNewTaskFor(cat.id);
                   setNewTaskName('');
                 }}
-                className="mt-2 flex items-center gap-1.5 text-sm font-medium text-emerald-700"
+                className="mt-2 flex items-center gap-1.5 text-sm font-medium text-lime-300"
               >
                 <PlusIcon className="h-4 w-4" />
                 Добавить задачу
-              </button>
+              </motion.button>
             )}
-          </div>
+          </motion.div>
         );
       })}
 
-      {/* Нижняя панель создания/редактирования категории */}
-      {form && (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40">
-          <form
-            onSubmit={submitCategory}
-            className="w-full max-w-[430px] rounded-t-2xl bg-white p-5 pb-8"
+      {/* Стеклянный bottom-sheet создания/редактирования */}
+      <AnimatePresence>
+        {form && (
+          <motion.div
+            className="fixed inset-0 z-40 flex items-end justify-center bg-black/50"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setForm(null)}
           >
-            <div className="flex items-center justify-between">
-              <h2 className="font-display text-lg font-semibold">
-                {form.id ? 'Редактировать категорию' : 'Новая категория'}
-              </h2>
-              <button
-                type="button"
-                aria-label="Закрыть"
-                onClick={() => setForm(null)}
-                className="rounded-lg p-2 text-gray-400"
-              >
-                <CloseIcon className="h-5 w-5" />
-              </button>
-            </div>
-
-            <label className="mt-4 block">
-              <span className="text-xs font-medium text-gray-500">Название</span>
-              <input
-                autoFocus
-                required
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="Например, «Финансы»"
-                className="mt-1 w-full rounded-xl border border-gray-300 px-3 py-2.5 text-base outline-none focus:border-emerald-500"
-              />
-            </label>
-
-            <div className="mt-4">
-              <span className="text-xs font-medium text-gray-500">Цвет</span>
-              <div className="mt-2 flex flex-wrap gap-2.5">
-                {CATEGORY_COLORS.map((c) => (
-                  <button
-                    key={c}
-                    type="button"
-                    aria-label={`Цвет ${c}`}
-                    onClick={() => setForm({ ...form, color: c })}
-                    className={`flex h-9 w-9 items-center justify-center rounded-full border-2 ${
-                      form.color === c ? 'border-gray-800' : 'border-transparent'
-                    }`}
-                    style={{ backgroundColor: c }}
-                  >
-                    {form.color === c && <CheckIcon className="h-4 w-4 text-white" />}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <label className="mt-4 block">
-              <span className="text-xs font-medium text-gray-500">Бизнес на планете</span>
-              <select
-                value={form.theme}
-                onChange={(e) => setForm({ ...form, theme: e.target.value as ThemeSlug })}
-                className="mt-1 w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-base outline-none focus:border-emerald-500"
-              >
-                {THEMES.map((t) => (
-                  <option key={t.slug} value={t.slug}>
-                    {t.title}
-                  </option>
-                ))}
-              </select>
-              <span className="mt-1 block text-xs text-gray-400">
-                Тема зоны для будущей мини-планеты — можно поменять в любой момент.
-              </span>
-            </label>
-
-            <button
-              type="submit"
-              disabled={busy || form.name.trim().length === 0}
-              className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 font-semibold text-white disabled:opacity-50"
+            <motion.form
+              onSubmit={submitCategory}
+              onClick={(e) => e.stopPropagation()}
+              className="glass-dark w-full max-w-[430px] !rounded-b-none p-5 pb-9"
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
             >
-              {busy && <Spinner className="h-4 w-4 text-white" />}
-              {form.id ? 'Сохранить' : 'Создать'}
-            </button>
-          </form>
-        </div>
-      )}
-    </div>
+              <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-white/25" />
+              <div className="flex items-center justify-between">
+                <h2 className="font-display text-lg font-medium text-white">
+                  {form.id ? 'Редактировать категорию' : 'Новая категория'}
+                </h2>
+                <motion.button
+                  type="button"
+                  whileTap={{ scale: 0.88 }}
+                  aria-label="Закрыть"
+                  onClick={() => setForm(null)}
+                  className="rounded-xl p-2 text-white/50"
+                >
+                  <CloseIcon className="h-5 w-5" />
+                </motion.button>
+              </div>
+
+              <label className="mt-4 block">
+                <span className="text-xs font-medium text-white/55">Название</span>
+                <input
+                  autoFocus
+                  required
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  placeholder="Например, «Финансы»"
+                  className={`mt-1 ${inputClass}`}
+                />
+              </label>
+
+              <div className="mt-4">
+                <span className="text-xs font-medium text-white/55">Цвет</span>
+                <div className="mt-2 flex flex-wrap gap-2.5">
+                  {CATEGORY_COLORS.map((c) => (
+                    <motion.button
+                      key={c}
+                      type="button"
+                      whileTap={{ scale: 0.85 }}
+                      aria-label={`Цвет ${c}`}
+                      onClick={() => setForm({ ...form, color: c })}
+                      className={`flex h-9 w-9 items-center justify-center rounded-full border-2 ${
+                        form.color === c ? 'border-white' : 'border-transparent'
+                      }`}
+                      style={{ backgroundColor: c }}
+                    >
+                      {form.color === c && <CheckIcon className="h-4 w-4 text-white" />}
+                    </motion.button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-4">
+                <span className="text-xs font-medium text-white/55">Бизнес на планете</span>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {THEMES.map((t) => {
+                    const isActive = form.theme === t.slug;
+                    return (
+                      <motion.button
+                        key={t.slug}
+                        type="button"
+                        whileTap={{ scale: 0.93 }}
+                        onClick={() => setForm({ ...form, theme: t.slug })}
+                        className={`rounded-full px-3.5 py-1.5 text-sm ${
+                          isActive
+                            ? 'bg-lime-300 font-semibold text-emerald-950'
+                            : 'border border-white/20 text-white/75'
+                        }`}
+                      >
+                        {t.title}
+                      </motion.button>
+                    );
+                  })}
+                </div>
+                <span className="mt-1.5 block text-xs text-white/40">
+                  Тема зоны на мини-планете — можно поменять в любой момент.
+                </span>
+              </div>
+
+              <motion.button
+                type="submit"
+                whileTap={{ scale: 0.96 }}
+                disabled={busy || form.name.trim().length === 0}
+                className="mt-5 flex w-full items-center justify-center gap-2 rounded-3xl bg-lime-300 py-3.5 font-display text-sm font-medium text-emerald-950 disabled:opacity-50"
+              >
+                {busy && <Spinner className="h-4 w-4 text-emerald-950" />}
+                {form.id ? 'Сохранить' : 'Создать'}
+              </motion.button>
+            </motion.form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
   );
 }

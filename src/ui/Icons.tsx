@@ -98,6 +98,47 @@ export function FolderIcon({ className = 'h-6 w-6' }: IconProps) {
   );
 }
 
+export function HomeIcon({ className = 'h-6 w-6' }: IconProps) {
+  return (
+    <svg {...base} className={className} aria-hidden="true">
+      <path d="M4 11 12 4l8 7M6 9.5V20h12V9.5M10 20v-5h4v5" />
+    </svg>
+  );
+}
+
+export function PlanetIcon({ className = 'h-6 w-6' }: IconProps) {
+  return (
+    <svg {...base} className={className} aria-hidden="true">
+      <circle cx="12" cy="12" r="7" />
+      <path d="M3.5 9.5c5-2.5 12-2.5 17 0M3.5 14.5c5 2.5 12 2.5 17 0" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+export function ArrowLeftIcon({ className = 'h-5 w-5' }: IconProps) {
+  return (
+    <svg {...base} className={className} aria-hidden="true">
+      <path d="M15 5l-7 7 7 7" />
+    </svg>
+  );
+}
+
+export function ArrowRightIcon({ className = 'h-5 w-5' }: IconProps) {
+  return (
+    <svg {...base} className={className} aria-hidden="true">
+      <path d="M9 5l7 7-7 7" />
+    </svg>
+  );
+}
+
+export function SparkIcon({ className = 'h-5 w-5' }: IconProps) {
+  return (
+    <svg {...base} className={className} aria-hidden="true">
+      <path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18" />
+    </svg>
+  );
+}
+
 export function LogoutIcon({ className = 'h-5 w-5' }: IconProps) {
   return (
     <svg {...base} className={className} aria-hidden="true">

@@ -60,17 +60,17 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ toast }}>
       {children}
-      <div className="pointer-events-none fixed inset-x-0 bottom-20 z-50 flex flex-col items-center gap-2 px-4">
+      <div className="pointer-events-none fixed inset-x-0 bottom-24 z-50 flex flex-col items-center gap-2 px-4">
         {items.map((t) => (
           <div
             key={t.id}
-            className="pointer-events-auto flex w-full max-w-sm items-center gap-3 rounded-xl bg-gray-900 px-4 py-3 text-sm text-white shadow-lg"
+            className="glass-dark pointer-events-auto flex w-full max-w-sm items-center gap-3 px-4 py-3 text-sm text-white"
           >
             <span className="min-w-0 flex-1 break-words">{t.message}</span>
             {t.action && (
               <button
                 type="button"
-                className="shrink-0 font-semibold text-emerald-400"
+                className="shrink-0 font-semibold text-lime-300"
                 onClick={() => {
                   t.action?.onAction();
                   dismiss(t.id);
