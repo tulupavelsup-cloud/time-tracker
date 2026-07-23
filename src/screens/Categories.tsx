@@ -437,7 +437,7 @@ export function CategoriesScreen() {
               </div>
 
               <div className="mt-4">
-                <span className="text-xs font-medium text-white/55">Бизнес на планете</span>
+                <span className="text-xs font-medium text-white/55">Станция на карте</span>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {THEMES.map((t) => {
                     const isActive = form.theme === t.slug;
@@ -459,7 +459,7 @@ export function CategoriesScreen() {
                   })}
                 </div>
                 <span className="mt-1.5 block text-xs text-white/40">
-                  Тема зоны на мини-планете — можно поменять в любой момент.
+                  Тема станции на карте — можно поменять в любой момент.
                 </span>
               </div>
 

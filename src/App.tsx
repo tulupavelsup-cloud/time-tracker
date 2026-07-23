@@ -1,8 +1,10 @@
 /**
- * Корень приложения (этап 2): живая зелёная сцена + стеклянный интерфейс.
- * 5 вкладок (Домой / Таймер / Статистика / Планета / Категории) в плавающем
- * стеклянном таб-баре; активная — лаймовая пилюля (layoutId), экраны въезжают
- * через AnimatePresence. Демо-режим (?demo=1) работает без Supabase и логина.
+ * Корень приложения: живая зелёная сцена + стеклянный интерфейс.
+ * После созвона №5 — 3 вкладки (Домой-карта / Статистика / Категории) в
+ * плавающем стеклянном таб-баре; активная — лаймовая пилюля (layoutId),
+ * экраны въезжают через AnimatePresence. «Домой» теперь сама игровая карта:
+ * тап по станции запускает таймер её категории — отдельные вкладки «Таймер»
+ * и «Планета» убраны (это одно и то же). Демо-режим (?demo=1) — без Supabase.
  */
 
 import { useEffect, useState } from 'react';
@@ -12,10 +14,8 @@ import { IS_DEMO, getUser, onAuthStateChange, signOut } from './api';
 import { isSupabaseConfigured } from './lib/supabase';
 import { NotConfigured } from './screens/NotConfigured';
 import { LoginScreen } from './screens/Login';
-import { HomeScreen } from './screens/Home';
-import { TimerScreen } from './screens/Timer';
+import { MapScreen } from './screens/Map';
 import { StatsScreen } from './screens/Stats';
-import { PlanetScreen } from './screens/Planet';
 import { CategoriesScreen } from './screens/Categories';
 import { ToastProvider, errorText, useToast } from './ui/Toast';
 import { Scene } from './ui/Scene';
@@ -23,19 +23,15 @@ import { LoadingBlock } from './ui/Spinner';
 import {
   ChartIcon,
   FolderIcon,
-  HomeIcon,
   LogoutIcon,
-  PlanetIcon,
-  TimerIcon,
+  MapIcon,
 } from './ui/Icons';
 
-export type Tab = 'home' | 'timer' | 'stats' | 'planet' | 'categories';
+export type Tab = 'home' | 'stats' | 'categories';
 
-const TABS: { id: Tab; label: string; icon: typeof TimerIcon }[] = [
-  { id: 'home', label: 'Домой', icon: HomeIcon },
-  { id: 'timer', label: 'Таймер', icon: TimerIcon },
+const TABS: { id: Tab; label: string; icon: typeof MapIcon }[] = [
+  { id: 'home', label: 'Домой', icon: MapIcon },
   { id: 'stats', label: 'Статистика', icon: ChartIcon },
-  { id: 'planet', label: 'Планета', icon: PlanetIcon },
   { id: 'categories', label: 'Категории', icon: FolderIcon },
 ];
 
@@ -59,8 +55,8 @@ function Shell({ user }: { user: User }) {
   }
 
   return (
-    <div className="relative mx-auto flex min-h-dvh max-w-[430px] flex-col">
-      <Scene blurred={tab === 'timer'} />
+    <div className="relative mx-auto flex min-h-dvh max-w-[430px] flex-col overflow-x-hidden">
+      <Scene />
 
       <header className="flex items-center gap-3 px-5 pb-1 pt-4">
         <div className="min-w-0 flex-1">
@@ -95,10 +91,8 @@ function Shell({ user }: { user: User }) {
             exit={{ opacity: 0, x: -28 }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
           >
-            {tab === 'home' && <HomeScreen onNavigate={setTab} />}
-            {tab === 'timer' && <TimerScreen />}
+            {tab === 'home' && <MapScreen onNavigate={setTab} />}
             {tab === 'stats' && <StatsScreen />}
-            {tab === 'planet' && <PlanetScreen />}
             {tab === 'categories' && <CategoriesScreen />}
           </motion.div>
         </AnimatePresence>

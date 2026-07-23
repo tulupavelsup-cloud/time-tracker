@@ -115,6 +115,15 @@ export function PlanetIcon({ className = 'h-6 w-6' }: IconProps) {
   );
 }
 
+export function MapIcon({ className = 'h-6 w-6' }: IconProps) {
+  return (
+    <svg {...base} className={className} aria-hidden="true">
+      <path d="M9 4 3.5 6.2v13.3L9 17.3l6 2.2 5.5-2.2V4L15 6.2 9 4Z" />
+      <path d="M9 4v13.3M15 6.2v13.3" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
 export function ArrowLeftIcon({ className = 'h-5 w-5' }: IconProps) {
   return (
     <svg {...base} className={className} aria-hidden="true">

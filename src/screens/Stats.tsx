@@ -244,13 +244,13 @@ export function StatsScreen() {
         </div>
       )}
 
-      {/* Прогресс зон планеты: всё время против порогов */}
+      {/* Прогресс станций на карте: всё время против порогов */}
       {categories.length > 0 && (
         <div className="glass-dark p-4">
           <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-white/50">
-            Прогресс зон
+            Прогресс станций
           </h2>
-          <p className="mb-3 text-xs text-white/45">Накоплено за всё время, растит вашу планету.</p>
+          <p className="mb-3 text-xs text-white/45">Накоплено за всё время, растит вашу карту.</p>
           <ul className="space-y-4">
             {categories.map((cat) => {
               const seconds = allTimeByCategory.get(cat.id) ?? 0;
