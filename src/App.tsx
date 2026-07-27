@@ -45,6 +45,8 @@ function initialTab(): Tab {
 function Shell({ user }: { user: User }) {
   const { toast } = useToast();
   const [tab, setTab] = useState<Tab>(initialTab);
+  // Внутри шахты (Map.tsx) интерфейс уходит: остаётся только 3D и тонкий слой
+  const [immersed, setImmersed] = useState(false);
 
   async function handleSignOut() {
     try {
@@ -58,7 +60,12 @@ function Shell({ user }: { user: User }) {
     <div className="relative mx-auto flex min-h-dvh max-w-[430px] flex-col overflow-x-hidden">
       <Scene />
 
-      <header className="flex items-center gap-3 px-5 pb-1 pt-4">
+      <motion.header
+        className="relative z-20 flex items-center gap-3 px-5 pb-1 pt-4"
+        animate={{ opacity: immersed ? 0 : 1, y: immersed ? -12 : 0 }}
+        transition={{ duration: 0.28 }}
+        style={{ pointerEvents: immersed ? 'none' : 'auto' }}
+      >
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h1 className="font-display text-base font-semibold text-white">Тайм-трекер</h1>
@@ -79,29 +86,34 @@ function Shell({ user }: { user: User }) {
         >
           <LogoutIcon />
         </motion.button>
-      </header>
+      </motion.header>
 
       <main className="flex flex-1 flex-col pb-[calc(96px+env(safe-area-inset-bottom))]">
         <AnimatePresence mode="wait">
           <motion.div
             key={tab}
             className="flex flex-1 flex-col"
-            initial={{ opacity: 0, x: 28 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -28 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
           >
-            {tab === 'home' && <MapScreen onNavigate={setTab} />}
+            {tab === 'home' && <MapScreen onNavigate={setTab} onImmersion={setImmersed} />}
             {tab === 'stats' && <StatsScreen />}
             {tab === 'categories' && <CategoriesScreen />}
           </motion.div>
         </AnimatePresence>
       </main>
 
-      {/* Плавающий стеклянный таб-бар */}
-      <nav
+      {/* Плавающий стеклянный таб-бар (под землёй прячется) */}
+      <motion.nav
         className="fixed inset-x-0 z-30 mx-auto w-full max-w-[430px] px-3"
-        style={{ bottom: 'calc(10px + env(safe-area-inset-bottom))' }}
+        animate={{ opacity: immersed ? 0 : 1, y: immersed ? 90 : 0 }}
+        transition={{ duration: 0.28 }}
+        style={{
+          bottom: 'calc(10px + env(safe-area-inset-bottom))',
+          pointerEvents: immersed ? 'none' : 'auto',
+        }}
       >
         <div className="glass-dark flex items-stretch px-1.5 py-1.5">
           {TABS.map(({ id, label, icon: Icon }) => {
@@ -133,7 +145,7 @@ function Shell({ user }: { user: User }) {
             );
           })}
         </div>
-      </nav>
+      </motion.nav>
     </div>
   );
 }

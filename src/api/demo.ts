@@ -91,8 +91,14 @@ function seed(categoryId: string, taskId: string | null, daysAgo: number, startH
   });
 }
 
-// Саморазвитие (шахта): 0.5 ч — уровень «Пустырь»
-seed('c-mine', null, 0, 8, 30);
+// Саморазвитие (шахта): ~31 ч — уровень «Империя» (показать шахту в силе)
+seed('c-mine', null, 0, 8, 60);
+seed('c-mine', null, 2, 7, 240);
+seed('c-mine', null, 5, 20, 300);
+seed('c-mine', null, 8, 6, 360);
+seed('c-mine', null, 12, 21, 300);
+seed('c-mine', null, 16, 8, 300);
+seed('c-mine', null, 22, 19, 300);
 // Школа (корпорация): 2 ч — «Лагерь»
 seed('c-corp', 't-math', 0, 10, 40);
 seed('c-corp', 't-eng', 2, 16, 45);

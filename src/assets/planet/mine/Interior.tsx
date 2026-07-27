@@ -1,68 +1,135 @@
 /**
- * Шахта — интерьер: подземный разрез, герой копает киркой,
- * алмазы поблёскивают в породе, вагонетка увозит добычу.
- * active=false — шахта «спит»: герой отдыхает у фонаря.
+ * Шахта внутри — детальный разрез кристальной пещеры (по референсам: гранёные
+ * скальные стены, тёплый зал с деревянным помостом и фонарями, бирюзовые
+ * кристаллы с холодным свечением). Герой копает у жилы, пока идёт таймер,
+ * иначе отдыхает. Число кристаллов растёт с уровнем. Широкая рамка — под окно
+ * панели станции.
  */
 
 import { motion } from 'framer-motion';
 import { Hero } from '../Hero';
-import { Diamond, Sparkle } from '../common';
+import { SoftDefs, VolRect, useSoftId } from '../soft';
+import { RockChunk, CrystalCluster, Pebble } from '../lowpoly';
+import { Lantern, MineCart } from './parts';
 
-const DIAMOND_SPOTS: [number, number][] = [
-  [255, 205], [300, 250], [220, 285], [330, 190], [270, 320],
-  [345, 300], [200, 230], [310, 350], [240, 370], [355, 240],
-  [185, 330], [285, 165],
-];
+// Холодная порода пещеры: свет → тень
+const COOL = ['#47556a', '#3a4658', '#2e3947', '#242d39', '#1a212b', '#11161e'];
 
 export function Interior({ level, active }: { level: number; active: boolean }) {
-  const diamonds = Math.min(DIAMOND_SPOTS.length, 3 + level * 2);
+  const id = useSoftId();
+  const clusters = Math.min(5, 2 + Math.floor(level / 1.5));
+
   return (
-    <svg viewBox="0 0 390 440" className="h-auto w-full" aria-hidden="true">
-      {/* Порода — слои */}
-      <rect width="390" height="440" fill="#241a14" />
-      <path d="M0 90 Q 120 60 220 95 T 390 80 V0 H0 Z" fill="#33241a" />
-      <path d="M0 200 Q 140 170 260 205 T 390 190" stroke="#3d2b1e" strokeWidth="26" fill="none" opacity="0.8" />
-      <path d="M0 330 Q 130 300 250 340 T 390 320" stroke="#1c1410" strokeWidth="30" fill="none" opacity="0.9" />
-      {/* Выработанный тоннель слева */}
-      <path d="M0 150 Q 90 120 175 150 V440 H0 Z" fill="#120d09" />
-      {/* Крепи */}
-      {[30, 90, 150].map((x) => (
-        <g key={x}>
-          <line x1={x} y1="165" x2={x} y2="440" stroke="#8a5a33" strokeWidth="7" />
-          <line x1={x - 16} y1="168" x2={x + 16} y2="168" stroke="#a06a3d" strokeWidth="7" strokeLinecap="round" />
-        </g>
+    <svg
+      viewBox="0 0 390 230"
+      className="absolute inset-0 h-full w-full"
+      preserveAspectRatio="xMidYMid slice"
+      aria-hidden="true"
+    >
+      <SoftDefs id={id} />
+
+      {/* Дальний фон */}
+      <rect width="390" height="230" fill="#0f141b" />
+
+      {/* Тёплый зал (задняя стена) */}
+      <path d="M58 214 L62 92 L150 72 L252 74 L332 98 L332 214 Z" fill="#2a2016" />
+      <path d="M62 92 L150 72 L252 74 L205 106 L120 120 Z" fill="#33271a" opacity="0.75" />
+      <path d="M70 150 Q 190 132 320 152" stroke="#3d2f20" strokeWidth="7" fill="none" opacity="0.6" />
+      <path d="M80 176 Q 200 162 318 182" stroke="#211913" strokeWidth="9" fill="none" opacity="0.7" />
+      {active && <ellipse cx="245" cy="150" rx="70" ry="60" fill="#2fd0e0" opacity="0.06" filter={`url(#${id}Glow)`} />}
+
+      {/* Гранёные скальные стены (рамка разреза) */}
+      {/* левая */}
+      <RockChunk cx={16} cy={150} s={2.6} pal={COOL} />
+      <RockChunk cx={10} cy={214} s={2.4} pal={COOL} flip />
+      <RockChunk cx={30} cy={70} s={2.4} pal={COOL} />
+      {/* правая */}
+      <RockChunk cx={372} cy={150} s={2.6} pal={COOL} flip />
+      <RockChunk cx={380} cy={214} s={2.4} pal={COOL} />
+      <RockChunk cx={358} cy={70} s={2.4} pal={COOL} flip />
+      {/* потолок */}
+      <RockChunk cx={110} cy={26} s={2.2} pal={COOL} />
+      <RockChunk cx={210} cy={22} s={2.2} pal={COOL} flip />
+      <RockChunk cx={300} cy={26} s={2.0} pal={COOL} />
+      {/* сталактиты + пылинки */}
+      {[95, 165, 250, 315].map((x, i) => (
+        <path key={x} d={`M${x} 40 l4 13 l4 -13 Z`} fill={COOL[3]} opacity={0.9 - i * 0.05} />
       ))}
-      {/* Фонарь */}
-      <line x1="120" y1="168" x2="120" y2="190" stroke="#5b4632" strokeWidth="2" />
-      <circle cx="120" cy="196" r="7" fill={active ? '#ffd977' : '#7a6a45'} />
-      {active && <circle cx="120" cy="196" r="26" fill="#ffd977" opacity="0.12" />}
-      {/* Алмазы в породе — больше с уровнем */}
-      {DIAMOND_SPOTS.slice(0, diamonds).map(([x, y], i) => (
-        <g key={i}>
-          <Diamond x={x} y={y} s={5 + (i % 3)} />
-          {active && <Sparkle x={x + 6} y={y - 7} r={2.2} delay={i * 0.25} />}
-        </g>
-      ))}
-      {/* Рельсы и вагонетка с добычей */}
-      <line x1="0" y1="416" x2="390" y2="416" stroke="#4d4652" strokeWidth="3" />
-      {Array.from({ length: 13 }, (_, i) => (
-        <line key={i} x1={10 + i * 30} y1="412" x2={10 + i * 30} y2="420" stroke="#4d4652" strokeWidth="2" />
+      <g fill="#bfeaf2">
+        <circle cx="175" cy="52" r="1.2" opacity="0.7" />
+        <circle cx="300" cy="58" r="1" opacity="0.6" />
+        <circle cx="130" cy="64" r="1.1" opacity="0.5" />
+      </g>
+
+      {/* Боковой тоннель + деревянная крепь слева */}
+      <path d="M40 214 L40 118 Q66 98 100 118 L100 214 Z" fill="#0b0705" />
+      <VolRect id={id} x={36} y={114} w={7} h={100} rx={2} fill="#8a5a33" />
+      <VolRect id={id} x={97} y={114} w={7} h={100} rx={2} fill="#8a5a33" />
+      <VolRect id={id} x={32} y={108} w={76} h={9} rx={3} fill="#9c6a3c" />
+
+      {/* Деревянный помост со ступенями */}
+      <g>
+        <VolRect id={id} x={112} y={168} w={70} h={40} rx={2} fill="#7a5330" />
+        <VolRect id={id} x={112} y={166} w={70} h={5} rx={2} fill="#986a3c" />
+        {[0, 1, 2].map((i) => (
+          <VolRect key={i} id={id} x={150 + i * 12} y={182 + i * 9} w={16} h={7} rx={1} fill="#8a5a33" />
+        ))}
+        {/* перила */}
+        <line x1="114" y1="168" x2="114" y2="150" stroke="#6b451f" strokeWidth="3" strokeLinecap="round" />
+        <line x1="150" y1="168" x2="150" y2="150" stroke="#6b451f" strokeWidth="3" strokeLinecap="round" />
+        <line x1="114" y1="152" x2="150" y2="152" stroke="#6b451f" strokeWidth="2.4" strokeLinecap="round" />
+      </g>
+
+      {/* Бочка и ящик */}
+      <g>
+        <VolRect id={id} x={124} y={150} w={13} h={17} rx={3} fill="#7a5330" />
+        <line x1="124" y1="156" x2="137" y2="156" stroke="#5b3b1f" strokeWidth="1" />
+        <line x1="124" y1="161" x2="137" y2="161" stroke="#5b3b1f" strokeWidth="1" />
+        <VolRect id={id} x={140} y={156} w={12} h={11} rx={1.5} fill="#8a5a33" />
+      </g>
+
+      {/* Пол — каменные плиты */}
+      <path d="M0 200 L390 200 L390 230 L0 230 Z" fill="#332e28" />
+      <path d="M0 200 L390 200 L390 206 L0 206 Z" fill="#463d31" />
+      <g stroke="#241f19" strokeWidth="1" opacity="0.5">
+        <path d="M120 206 V230 M230 206 V230 M320 206 V230" />
+      </g>
+
+      {/* Тёплый фонарь у крепи */}
+      <path d="M150 108 v10" stroke="#5b4632" strokeWidth="2" />
+      <Lantern id={id} x={150} y={118} on={active} s={2.6} />
+
+      {/* Порода-жила справа + кристаллы (растут с уровнем) */}
+      <path d="M250 206 L252 168 Q 300 144 352 168 L354 206 Z" fill={COOL[2]} />
+      <path d="M252 168 Q 300 144 352 168 L322 178 L285 182 L262 176 Z" fill={COOL[1]} />
+      {Array.from({ length: clusters }).map((_, i) => {
+        const spots: [number, number, number][] = [
+          [268, 176, 0.9], [300, 168, 1.15], [330, 176, 0.85], [284, 150, 0.7], [316, 150, 0.7],
+        ];
+        const [x, y, sc] = spots[i];
+        return <CrystalCluster key={i} id={id} x={x} y={y} s={sc} active={active || i % 2 === 0} />;
+      })}
+
+      {/* Камни на полу */}
+      <Pebble x={70} y={198} s={1.6} pal={COOL} />
+      <Pebble x={210} y={200} s={1.3} pal={COOL} flip />
+
+      {/* Рельсы + вагонетка */}
+      <line x1="0" y1="208" x2="390" y2="208" stroke="#4d4652" strokeWidth="3" />
+      {Array.from({ length: 14 }, (_, i) => (
+        <line key={i} x1={10 + i * 28} y1="204" x2={10 + i * 28} y2="212" stroke="#4d4652" strokeWidth="2" />
       ))}
       <motion.g
-        animate={active ? { x: [-40, 300] } : { x: 60 }}
-        transition={active ? { repeat: Infinity, duration: 6, ease: 'linear' } : undefined}
+        animate={active ? { x: [-40, 300] } : { x: 40 }}
+        transition={active ? { repeat: Infinity, duration: 7, ease: 'linear' } : undefined}
       >
-        <path d="M0 388 L6 408 H34 L40 388 Z" fill="#7a4a26" stroke="#5b3b1f" strokeWidth="2" />
-        <circle cx="10" cy="411" r="4.5" fill="#2e2833" />
-        <circle cx="30" cy="411" r="4.5" fill="#2e2833" />
-        <Diamond x={13} y={385} s={5} />
-        <Diamond x={26} y={383} s={4} />
+        <MineCart id={id} x={0} y={206} ore s={2} />
       </motion.g>
-      {/* Герой: копает у стены или отдыхает у фонаря */}
-      <g transform={active ? 'translate(150,330) scale(1.5)' : 'translate(80,335) scale(1.5)'}>
+
+      {/* Герой: копает у жилы (active) или отдыхает у помоста */}
+      <g transform={active ? 'translate(206,150) scale(1.9)' : 'translate(150,152) scale(1.8)'}>
         <Hero working={active} tool="pickaxe" sitting={!active} size={40} />
       </g>
-      {active && <Sparkle x={225} y={345} r={3} color="#ffe9a1" delay={0.3} />}
     </svg>
   );
 }

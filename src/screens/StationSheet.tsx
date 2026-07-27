@@ -181,11 +181,9 @@ export function StationSheet({
         transition={{ type: 'spring', stiffness: 280, damping: 32 }}
       >
         {/* Интерьер станции: герой трудится, пока идёт таймер */}
-        <div className="relative h-40 overflow-hidden bg-black/40">
-          <div className="absolute inset-0 flex items-center justify-center">
-            <Interior level={level.level} active={runningHere} />
-          </div>
-          {!runningHere && <div className="pointer-events-none absolute inset-0 bg-black/45" />}
+        <div className="relative h-52 overflow-hidden bg-[#141b24]">
+          <Interior level={level.level} active={runningHere} />
+          {!runningHere && <div className="pointer-events-none absolute inset-0 bg-black/40" />}
           {/* Кнопка назад */}
           <motion.button
             type="button"
