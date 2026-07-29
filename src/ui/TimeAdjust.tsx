@@ -1,18 +1,19 @@
 /**
- * Ручная правка наработанного времени станции: «забыл включить таймер —
- * добавить», «забыл выключить — откатить».
+ * Ручная правка наработанного времени: «забыл включить таймер — добавить»,
+ * «забыл выключить — откатить». Правим всю станцию-категорию или одну её
+ * задачу (проп task) — у задачи те же сессии, только отобранные по task_id.
  *
  * TimeAdjustButton — кнопка, которая сама открывает стеклянную панель; стоит у
- * каждой категории (экран «Категории»), в панели станции и в подробностях
- * шахты. Считает и показывает, что станет с суммой, а сама правка живёт в
- * api/adjust.ts (добавление — закрытая сессия задним числом, снятие — подрезка
- * последних сессий).
+ * каждой категории и каждой задачи (экран «Категории»), в панели станции и в
+ * подробностях шахты. Считает и показывает, что станет с суммой, а сама правка
+ * живёт в api/adjust.ts (добавление — закрытая сессия задним числом, снятие —
+ * подрезка последних сессий).
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { addTime, subtractTime, type Category } from '../api';
+import { addTime, subtractTime, type Category, type Task } from '../api';
 import { formatDuration } from '../lib/format';
 import { categoryColor } from '../lib/palette';
 import { errorText, useToast } from './Toast';
@@ -24,9 +25,19 @@ type Mode = 'add' | 'cut';
 /** Быстрые размеры правки, минуты. */
 const PRESETS = [15, 30, 60, 120, 240, 480];
 
+/** Шаг кнопок ±: ровно минута (мелкие огрехи важнее круглых цифр). */
+const STEP = 1;
+const MIN_MINUTES = 1;
+const MAX_MINUTES = 24 * 60;
+/** Автоповтор при удержании ±: пауза перед разгоном и период повтора, мс. */
+const HOLD_DELAY = 420;
+const HOLD_PERIOD = 60;
+
 interface TimeAdjustProps {
   category: Category;
-  /** Наработано у категории всего, секунды — чтобы показать «станет» */
+  /** Задача внутри категории — правим только её время; без неё правим всю станцию */
+  task?: Task | null;
+  /** Наработано у категории (или у задачи), секунды — чтобы показать «станет» */
   totalSeconds: number;
   /** Перечитать данные экрана после правки */
   onChanged: () => void | Promise<void>;
@@ -36,8 +47,63 @@ function label(minutes: number): string {
   return formatDuration(minutes * 60);
 }
 
+/**
+ * Кнопка шага ±: минута по тапу, дальше разгон, пока держат палец.
+ * По минуте иначе не наберёшь час, а пресеты дают только круглые значения.
+ */
+function StepButton({
+  onStep,
+  disabled,
+  ariaLabel,
+  children,
+}: {
+  onStep: () => void;
+  disabled: boolean;
+  ariaLabel: string;
+  children: ReactNode;
+}) {
+  const timers = useRef<number[]>([]);
+
+  function stop() {
+    for (const id of timers.current) window.clearTimeout(id);
+    for (const id of timers.current) window.clearInterval(id);
+    timers.current = [];
+  }
+
+  useEffect(() => stop, []);
+
+  return (
+    <motion.button
+      type="button"
+      whileTap={{ scale: 0.9 }}
+      aria-label={ariaLabel}
+      disabled={disabled}
+      onPointerDown={() => {
+        if (disabled) return;
+        onStep();
+        timers.current.push(
+          window.setTimeout(() => {
+            timers.current.push(window.setInterval(onStep, HOLD_PERIOD));
+          }, HOLD_DELAY),
+        );
+      }}
+      onPointerUp={stop}
+      onPointerLeave={stop}
+      onPointerCancel={stop}
+      // с клавиатуры pointer-событий нет — у такого click detail === 0
+      onClick={(e) => {
+        if (e.detail === 0 && !disabled) onStep();
+      }}
+      className="glass-dark h-10 w-12 !rounded-2xl font-display text-lg text-white disabled:opacity-40"
+    >
+      {children}
+    </motion.button>
+  );
+}
+
 function TimeAdjustSheet({
   category,
+  task,
   totalSeconds,
   onChanged,
   onClose,
@@ -49,6 +115,8 @@ function TimeAdjustSheet({
 
   const seconds = minutes * 60;
   const color = categoryColor(category.color);
+  const subject = task ? task.name : category.name;
+  const what = task ? 'У задачи' : 'У станции';
   // снять больше, чем наработано, нельзя — обрезаем прямо в предпросмотре
   const cutSeconds = Math.min(seconds, totalSeconds);
   const after = mode === 'add' ? totalSeconds + seconds : totalSeconds - cutSeconds;
@@ -59,15 +127,15 @@ function TimeAdjustSheet({
     setBusy(true);
     try {
       if (mode === 'add') {
-        await addTime(category.id, seconds);
-        toast(`«${category.name}»: добавлено ${formatDuration(seconds)}.`);
+        await addTime(category.id, seconds, task?.id ?? null);
+        toast(`«${subject}»: добавлено ${formatDuration(seconds)}.`);
       } else {
-        const res = await subtractTime(category.id, seconds);
+        const res = await subtractTime(category.id, seconds, task?.id ?? null);
         if (res.seconds === 0) {
-          toast(`«${category.name}»: снимать нечего — записанного времени нет.`);
+          toast(`«${subject}»: снимать нечего — записанного времени нет.`);
         } else {
           toast(
-            `«${category.name}»: снято ${formatDuration(res.seconds)}.` +
+            `«${subject}»: снято ${formatDuration(res.seconds)}.` +
               (res.stoppedActive ? ' Идущий таймер остановлен.' : ''),
           );
         }
@@ -103,8 +171,12 @@ function TimeAdjustSheet({
         <div className="flex items-center gap-3">
           <span className="h-3.5 w-3.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />
           <div className="min-w-0 flex-1">
-            <p className="font-display text-base text-white">Поправить время</p>
-            <p className="truncate text-[12px] text-white/55">{category.name}</p>
+            <p className="font-display text-base text-white">
+              {task ? 'Поправить время задачи' : 'Поправить время'}
+            </p>
+            <p className="truncate text-[12px] text-white/55">
+              {task ? `${category.name} · ${task.name}` : category.name}
+            </p>
           </div>
           <motion.button
             type="button"
@@ -161,36 +233,33 @@ function TimeAdjustSheet({
             ))}
           </div>
           <div className="mt-3 flex items-center gap-3">
-            <motion.button
-              type="button"
-              whileTap={{ scale: 0.9 }}
-              aria-label="Минус 15 минут"
-              disabled={minutes <= 15}
-              onClick={() => setMinutes((v) => Math.max(15, v - 15))}
-              className="glass-dark h-10 w-12 !rounded-2xl font-display text-lg text-white disabled:opacity-40"
+            <StepButton
+              ariaLabel="Минус минута"
+              disabled={minutes <= MIN_MINUTES}
+              onStep={() => setMinutes((v) => Math.max(MIN_MINUTES, v - STEP))}
             >
               −
-            </motion.button>
+            </StepButton>
             <p className="flex-1 text-center font-display text-xl tabular-nums text-white">
               {label(minutes)}
             </p>
-            <motion.button
-              type="button"
-              whileTap={{ scale: 0.9 }}
-              aria-label="Плюс 15 минут"
-              disabled={minutes >= 24 * 60}
-              onClick={() => setMinutes((v) => Math.min(24 * 60, v + 15))}
-              className="glass-dark h-10 w-12 !rounded-2xl font-display text-lg text-white disabled:opacity-40"
+            <StepButton
+              ariaLabel="Плюс минута"
+              disabled={minutes >= MAX_MINUTES}
+              onStep={() => setMinutes((v) => Math.min(MAX_MINUTES, v + STEP))}
             >
               +
-            </motion.button>
+            </StepButton>
           </div>
+          <p className="mt-1.5 text-center text-[11px] text-white/35">
+            По минуте за нажатие, удерживай — побежит быстрее
+          </p>
         </div>
 
         {/* Что получится */}
         <div className="rounded-2xl bg-white/8 p-3 text-[12px] text-white/70">
           {nothingToCut ? (
-            <span>У станции ещё нет записанного времени — откатывать нечего.</span>
+            <span>{what} ещё нет записанного времени — откатывать нечего.</span>
           ) : (
             <span>
               Было {formatDuration(totalSeconds)} → станет{' '}
@@ -220,30 +289,34 @@ function TimeAdjustSheet({
 
 /**
  * Кнопка «Поправить время» вместе с самой панелью.
- * variant: icon — только иконка (в плотных списках), text — иконка с подписью.
+ * variant: icon — только иконка (в списке категорий), compact — та же иконка
+ * помельче (в строке задачи, вровень с карандашом), text — иконка с подписью.
  */
 export function TimeAdjustButton({
   variant = 'text',
   className,
   ...sheet
-}: TimeAdjustProps & { variant?: 'icon' | 'text'; className?: string }) {
+}: TimeAdjustProps & { variant?: 'icon' | 'compact' | 'text'; className?: string }) {
   const [open, setOpen] = useState(false);
-  const isIcon = variant === 'icon';
+  const compact = variant === 'compact';
+  const isIcon = compact || variant === 'icon';
   return (
     <>
       <motion.button
         type="button"
         whileTap={{ scale: 0.9 }}
         onClick={() => setOpen(true)}
-        aria-label={`Поправить время «${sheet.category.name}»`}
+        aria-label={`Поправить время «${sheet.task?.name ?? sheet.category.name}»`}
         className={
           className ??
-          (isIcon
-            ? 'rounded-xl p-2 text-white/45'
-            : 'flex items-center gap-1.5 text-sm font-medium text-white/70')
+          (compact
+            ? 'rounded-lg p-1.5 text-white/40'
+            : isIcon
+              ? 'rounded-xl p-2 text-white/45'
+              : 'flex items-center gap-1.5 text-sm font-medium text-white/70')
         }
       >
-        <ClockAdjustIcon className={isIcon ? 'h-5 w-5' : 'h-4 w-4'} />
+        <ClockAdjustIcon className={compact ? 'h-3.5 w-3.5' : isIcon ? 'h-5 w-5' : 'h-4 w-4'} />
         {!isIcon && 'Поправить время'}
       </motion.button>
       <AnimatePresence>

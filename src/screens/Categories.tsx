@@ -14,6 +14,7 @@ import {
   createTask,
   getCategories,
   getCategoryTotals,
+  getTaskTotals,
   getTasks,
   updateCategory,
   updateTask,
@@ -43,6 +44,7 @@ export function CategoriesScreen() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [totals, setTotals] = useState<Map<string, number>>(new Map());
+  const [taskTotals, setTaskTotals] = useState<Map<string, number>>(new Map());
   const [form, setForm] = useState<CategoryFormState | null>(null);
   const [busy, setBusy] = useState(false);
   const [newTaskFor, setNewTaskFor] = useState<string | null>(null);
@@ -52,14 +54,16 @@ export function CategoriesScreen() {
 
   const refresh = useCallback(async () => {
     try {
-      const [cats, allTasks, catTotals] = await Promise.all([
+      const [cats, allTasks, catTotals, tskTotals] = await Promise.all([
         getCategories(),
         getTasks(),
         getCategoryTotals(),
+        getTaskTotals(),
       ]);
       setCategories(cats);
       setTasks(allTasks);
       setTotals(new Map(catTotals.map((t) => [t.category_id, t.total_seconds])));
+      setTaskTotals(new Map(tskTotals.map((t) => [t.task_id, t.total_seconds])));
     } catch (err) {
       toast(errorText(err));
     } finally {
@@ -305,6 +309,17 @@ export function CategoriesScreen() {
                   <li key={task.id} className="flex items-center gap-2 text-sm text-white/85">
                     <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-white/30" />
                     <span className="min-w-0 flex-1 truncate">{task.name}</span>
+                    <span className="shrink-0 text-[11px] tabular-nums text-white/40">
+                      {formatDuration(taskTotals.get(task.id) ?? 0)}
+                    </span>
+                    {/* время задачи правится отдельно от всей станции */}
+                    <TimeAdjustButton
+                      variant="compact"
+                      category={cat}
+                      task={task}
+                      totalSeconds={taskTotals.get(task.id) ?? 0}
+                      onChanged={refresh}
+                    />
                     <motion.button
                       type="button"
                       whileTap={{ scale: 0.85 }}

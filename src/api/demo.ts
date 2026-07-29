@@ -273,12 +273,13 @@ export async function addTime(categoryId: string, seconds: number, taskId?: stri
 export async function subtractTime(
   categoryId: string,
   seconds: number,
+  taskId?: string | null,
 ): Promise<{ seconds: number; stoppedActive: boolean }> {
   let left = Math.max(0, Math.round(seconds));
   let cut = 0;
   let stoppedActive = false;
   const mine = sessions
-    .filter((s) => s.category_id === categoryId)
+    .filter((s) => s.category_id === categoryId && (!taskId || s.task_id === taskId))
     .sort((a, b) => (a.started_at < b.started_at ? 1 : -1));
 
   for (const s of mine) {

@@ -1,9 +1,12 @@
 /**
- * Ручная правка времени категории — на случай «забыл включить/выключить таймер».
+ * Ручная правка времени — на случай «забыл включить/выключить таймер».
+ * Правим либо всю категорию, либо одну её задачу (taskId): у задачи те же
+ * сессии, просто отобранные по task_id, поэтому её правка меняет и сумму
+ * категории — как и должно быть.
  *
  * Добавление — это честная закрытая сессия задним числом (заканчивается «сейчас»,
  * а если таймер уже идёт — прямо перед его стартом, чтобы время не задвоилось).
- * Снятие — подрезка последних сессий категории с конца: у идущей сдвигаем начало,
+ * Снятие — подрезка последних сессий с конца: у идущей сдвигаем начало,
  * у закрытых уменьшаем ended_at и duration_seconds, полностью съеденные удаляем.
  * Так правка честно отражается и в «сегодня», и в статистике за период — они
  * считаются по меткам времени, а не по отдельному счётчику.
@@ -58,19 +61,21 @@ export async function addTime(
 }
 
 /**
- * Снять у категории лишнее время: seconds секунд, начиная с самых свежих
- * сессий. Возвращает, сколько реально удалось снять.
+ * Снять лишнее время: seconds секунд, начиная с самых свежих сессий.
+ * С taskId режем только сессии этой задачи, без него — все сессии категории.
+ * Возвращает, сколько реально удалось снять.
  */
-export async function subtractTime(categoryId: string, seconds: number): Promise<TimeCutResult> {
+export async function subtractTime(
+  categoryId: string,
+  seconds: number,
+  taskId?: string | null,
+): Promise<TimeCutResult> {
   let left = Math.max(0, Math.round(seconds));
   if (left === 0) return { seconds: 0, stoppedActive: false };
 
-  const { data, error } = await supabase
-    .from(TABLE)
-    .select('*')
-    .eq('category_id', categoryId)
-    .order('started_at', { ascending: false })
-    .limit(200);
+  let query = supabase.from(TABLE).select('*').eq('category_id', categoryId);
+  if (taskId) query = query.eq('task_id', taskId);
+  const { data, error } = await query.order('started_at', { ascending: false }).limit(200);
   if (error) throw new Error(`subtractTime: ${error.message}`);
 
   const rows = (data ?? []) as Session[];
