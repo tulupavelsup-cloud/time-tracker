@@ -250,6 +250,59 @@ export async function startSession(categoryId: string, taskId?: string): Promise
   return delay(s);
 }
 
+// ---------- ручная правка времени ----------
+
+export async function addTime(categoryId: string, seconds: number, taskId?: string | null): Promise<Session> {
+  const sec = Math.max(1, Math.round(seconds));
+  const active = sessions.find((s) => s.ended_at === null);
+  const endMs = active ? Math.min(Date.now(), new Date(active.started_at).getTime()) : Date.now();
+  const s: Session = {
+    id: uid('s'),
+    user_id: DEMO_USER_ID,
+    category_id: categoryId,
+    task_id: taskId ?? null,
+    started_at: new Date(endMs - sec * 1000).toISOString(),
+    ended_at: new Date(endMs).toISOString(),
+    duration_seconds: sec,
+    note: 'Добавлено вручную',
+  };
+  sessions.push(s);
+  return delay({ ...s });
+}
+
+export async function subtractTime(
+  categoryId: string,
+  seconds: number,
+): Promise<{ seconds: number; stoppedActive: boolean }> {
+  let left = Math.max(0, Math.round(seconds));
+  let cut = 0;
+  let stoppedActive = false;
+  const mine = sessions
+    .filter((s) => s.category_id === categoryId)
+    .sort((a, b) => (a.started_at < b.started_at ? 1 : -1));
+
+  for (const s of mine) {
+    if (left <= 0) break;
+    const startMs = new Date(s.started_at).getTime();
+    const endMs = s.ended_at ? new Date(s.ended_at).getTime() : Date.now();
+    const duration = Math.max(0, Math.round((endMs - startMs) / 1000));
+    if (duration === 0) continue;
+    const take = Math.min(duration, left);
+    if (take >= duration) {
+      sessions.splice(sessions.indexOf(s), 1);
+      if (!s.ended_at) stoppedActive = true;
+    } else if (s.ended_at) {
+      s.ended_at = new Date(endMs - take * 1000).toISOString();
+      s.duration_seconds = duration - take;
+    } else {
+      s.started_at = new Date(startMs + take * 1000).toISOString();
+    }
+    cut += take;
+    left -= take;
+  }
+  return delay({ seconds: cut, stoppedActive });
+}
+
 // ---------- stats ----------
 
 /** Секунды сессии, попавшие в [from, now] (идущая — до now). */

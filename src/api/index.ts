@@ -11,6 +11,7 @@ import * as realAuth from './auth';
 import * as realCategories from './categories';
 import * as realTasks from './tasks';
 import * as realSessions from './sessions';
+import * as realAdjust from './adjust';
 import * as realStats from './stats';
 import * as demo from './demo';
 
@@ -41,6 +42,9 @@ export const startSession = IS_DEMO ? demo.startSession : realSessions.startSess
 export const stopSession = IS_DEMO ? demo.stopSession : realSessions.stopSession;
 export const getActiveSession = IS_DEMO ? demo.getActiveSession : realSessions.getActiveSession;
 export const getLastSession = IS_DEMO ? demo.getLastSession : realSessions.getLastSession;
+
+export const addTime = IS_DEMO ? demo.addTime : realAdjust.addTime;
+export const subtractTime = IS_DEMO ? demo.subtractTime : realAdjust.subtractTime;
 
 export const getCategoryTotals = IS_DEMO ? demo.getCategoryTotals : realStats.getCategoryTotals;
 export const getTaskTotals = IS_DEMO ? demo.getTaskTotals : realStats.getTaskTotals;

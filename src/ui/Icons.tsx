@@ -82,6 +82,17 @@ export function TimerIcon({ className = 'h-6 w-6' }: IconProps) {
   );
 }
 
+/** Часы со знаком ± — ручная правка наработанного времени. */
+export function ClockAdjustIcon({ className = 'h-5 w-5' }: IconProps) {
+  return (
+    <svg {...base} className={className} aria-hidden="true">
+      <path d="M20.5 11.2A8.5 8.5 0 1 0 12.8 20" strokeWidth="1.8" />
+      <path d="M12 7v5l3 1.8" strokeWidth="1.8" />
+      <path d="M19.5 14.2v4M17.5 16.2h4M17.5 20.5h4" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
 export function ChartIcon({ className = 'h-6 w-6' }: IconProps) {
   return (
     <svg {...base} className={className} aria-hidden="true">

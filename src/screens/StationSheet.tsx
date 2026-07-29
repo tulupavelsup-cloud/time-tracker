@@ -23,6 +23,7 @@ import { getZoneLevel, getNextLevel, getLevelProgress } from '../lib/thresholds'
 import { getTheme } from '../lib/themes';
 import { zoneAssets } from '../assets/planet';
 import { errorText, useToast } from '../ui/Toast';
+import { TimeAdjustButton } from '../ui/TimeAdjust';
 import { ArrowLeftIcon, PlayIcon, SparkIcon, StopIcon } from '../ui/Icons';
 
 interface Celebration {
@@ -234,6 +235,15 @@ export function StationSheet({
                 initial={false}
                 animate={{ width: `${Math.round(progress * 100)}%` }}
                 transition={{ type: 'spring', stiffness: 120, damping: 22 }}
+              />
+            </div>
+            {/* забыл включить/выключить таймер — поправить часы руками */}
+            <div className="mt-2 flex justify-end">
+              <TimeAdjustButton
+                category={category}
+                totalSeconds={totalSeconds}
+                onChanged={onChanged}
+                className="flex items-center gap-1.5 text-[12px] font-medium text-white/55"
               />
             </div>
           </div>

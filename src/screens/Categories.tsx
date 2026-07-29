@@ -26,6 +26,7 @@ import { THEMES, getTheme, suggestTheme } from '../lib/themes';
 import { getZoneLevel } from '../lib/thresholds';
 import { formatDuration } from '../lib/format';
 import { errorText, useToast } from '../ui/Toast';
+import { TimeAdjustButton } from '../ui/TimeAdjust';
 import { LoadingBlock, Spinner } from '../ui/Spinner';
 import { ArchiveIcon, CheckIcon, CloseIcon, PencilIcon, PlusIcon } from '../ui/Icons';
 
@@ -245,6 +246,13 @@ export function CategoriesScreen() {
                   {level.title} · {formatDuration(seconds)}
                 </p>
               </div>
+              {/* забыл включить/выключить таймер — поправить часы руками */}
+              <TimeAdjustButton
+                variant="icon"
+                category={cat}
+                totalSeconds={seconds}
+                onChanged={refresh}
+              />
               <motion.button
                 type="button"
                 whileTap={{ scale: 0.88 }}
