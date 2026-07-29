@@ -1,7 +1,7 @@
 /**
  * Экран «Домой» = 3D-остров (Three.js). Наклонённая карта-диорама: можно
  * перетаскивать, приближать/отдалять и вращать. Станции-категории стоят на
- * острове; шахта — 3D-модель, к которой можно подъехать и рассмотреть.
+ * острове; шахта и банк — 3D-модели, к которым можно подъехать и рассмотреть.
  *
  * Тап по обычной станции открывает панель запуска таймера (StationSheet), а тап
  * по ШАХТЕ проваливает внутрь: камера ныряет в портал, экран гаснет и
@@ -30,6 +30,7 @@ import {
   getMineStage,
   getMineStageProgress,
   getNextMineStage,
+  MAX_LEVEL,
   MINE_STAGES,
   ZONE_LEVELS,
 } from '../lib/thresholds';
@@ -37,6 +38,7 @@ import { elapsedSeconds, formatClock, formatDuration, formatHours } from '../lib
 import { categoryColor } from '../lib/palette';
 import { StationSheet } from './StationSheet';
 import { errorText, useToast } from '../ui/Toast';
+import { TimeAdjustButton } from '../ui/TimeAdjust';
 import { LoadingBlock } from '../ui/Spinner';
 import { ArrowLeftIcon, PlayIcon, SparkIcon, StopIcon } from '../ui/Icons';
 import { AnimatePresence } from 'framer-motion';
@@ -89,22 +91,16 @@ export function MapScreen({
   const [mineParty, setMineParty] = useState<MineCelebration | null>(null);
   const timers = useRef<number[]>([]);
   const deepLinked = useRef(false);
-  // Демо: принудительный уровень шахты для просмотра всех стадий (null = по часам).
-  // Начальное значение можно задать через ?level=0..6 (удобно для ссылок/скринов).
-  const [mineLevel, setMineLevel] = useState<number | null>(() => {
+  // Демо: принудительный уровень шахты для просмотра всех стадий (null = по
+  // часам). Шкала ОДНА снаружи и внутри (0..6), поэтому переключатель тоже
+  // один. Задаётся через ?level=0..6 (?stage= — старый алиас из QA-ссылок).
+  const [demoLevel, setDemoLevel] = useState<number | null>(() => {
     if (!IS_DEMO || typeof window === 'undefined') return null;
-    const raw = new URLSearchParams(window.location.search).get('level');
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get('level') ?? params.get('stage');
     if (raw == null) return null;
     const n = Number(raw);
-    return Number.isInteger(n) && n >= 0 && n <= 6 ? n : null;
-  });
-  // Демо: принудительная стадия ВНУТРЕННОСТЕЙ шахты 1..10 (?stage=1..10)
-  const [mineStageOverride, setMineStageOverride] = useState<number | null>(() => {
-    if (!IS_DEMO || typeof window === 'undefined') return null;
-    const raw = new URLSearchParams(window.location.search).get('stage');
-    if (raw == null) return null;
-    const n = Number(raw);
-    return Number.isInteger(n) && n >= 1 && n <= 10 ? n : null;
+    return Number.isInteger(n) && n >= 0 && n <= MAX_LEVEL ? n : null;
   });
 
   async function loadAll() {
@@ -318,8 +314,8 @@ export function MapScreen({
   const immersed = view !== 'map';
   const insideCat = insideId ? categories.find((c) => c.id === insideId) ?? null : null;
   const insideSeconds = insideCat ? liveTotals.get(insideCat.id) ?? 0 : 0;
-  const insideStage = mineStageOverride ?? getMineStage(insideSeconds).level;
-  const insideStageTitle = MINE_STAGES[insideStage - 1].title;
+  const insideLevel = demoLevel ?? getMineStage(insideSeconds).level;
+  const insideStageTitle = MINE_STAGES[insideLevel].title;
   const nextStage = getNextMineStage(insideSeconds);
   const stageProgress = getMineStageProgress(insideSeconds);
   const hoursToNextStage = nextStage ? Math.max(1, Math.ceil(nextStage.minHours - insideSeconds / 3600)) : 0;
@@ -338,9 +334,9 @@ export function MapScreen({
               totals={liveTotals}
               activeCategoryId={active?.category_id ?? null}
               onOpen={handleStation}
-              mineLevelOverride={mineLevel}
+              levelOverride={demoLevel}
               view={view}
-              mineStage={insideStage}
+              mineLevel={insideLevel}
               mineActive={runningInside}
             />
           </Suspense>
@@ -433,13 +429,13 @@ export function MapScreen({
         <div className="fixed left-2 top-1/2 z-30 -translate-y-1/2">
           <div className="glass-dark flex flex-col gap-1 p-1.5">
             <span className="px-1 pb-0.5 text-center text-[9px] font-semibold uppercase tracking-wide text-white/55">
-              Шахта
+              Уровень
             </span>
             <button
               type="button"
-              onClick={() => setMineLevel(null)}
+              onClick={() => setDemoLevel(null)}
               className={`h-7 w-9 rounded-lg text-[11px] font-semibold transition ${
-                mineLevel === null ? 'bg-lime-300 text-emerald-950' : 'text-white/70 hover:bg-white/10'
+                demoLevel === null ? 'bg-lime-300 text-emerald-950' : 'text-white/70 hover:bg-white/10'
               }`}
             >
               Авто
@@ -449,16 +445,16 @@ export function MapScreen({
                 key={z.level}
                 type="button"
                 title={z.title}
-                onClick={() => setMineLevel(z.level)}
+                onClick={() => setDemoLevel(z.level)}
                 className={`h-7 w-9 rounded-lg text-[11px] font-semibold transition ${
-                  mineLevel === z.level ? 'bg-lime-300 text-emerald-950' : 'text-white/70 hover:bg-white/10'
+                  demoLevel === z.level ? 'bg-lime-300 text-emerald-950' : 'text-white/70 hover:bg-white/10'
                 }`}
               >
                 {z.level}
               </button>
             ))}
             <span className="px-0.5 pt-0.5 text-center text-[8px] leading-tight text-white/50">
-              {mineLevel === null ? 'по часам' : ZONE_LEVELS[mineLevel].title}
+              {demoLevel === null ? 'по часам' : ZONE_LEVELS[demoLevel].title}
             </span>
           </div>
         </div>
@@ -494,7 +490,7 @@ export function MapScreen({
             >
               <p className="truncate font-display text-sm text-white">{insideCat.name}</p>
               <p className="text-[11px] text-white/60">
-                {insideStageTitle} · стадия {insideStage} из {MINE_STAGES.length}
+                {insideStageTitle} · ур. {insideLevel} из {MAX_LEVEL}
               </p>
             </div>
 
@@ -549,18 +545,18 @@ export function MapScreen({
               </div>
             </motion.div>
 
-            {/* Демо: пролистать все 10 стадий вживую */}
+            {/* Демо: пролистать все уровни вживую (шкала общая с картой) */}
             {IS_DEMO && (
               <div className="pointer-events-auto absolute left-2 top-1/2 -translate-y-1/2">
                 <div className="glass-dark flex flex-col gap-0.5 p-1.5">
                   <span className="px-1 pb-0.5 text-center text-[9px] font-semibold uppercase tracking-wide text-white/55">
-                    Стадия
+                    Уровень
                   </span>
                   <button
                     type="button"
-                    onClick={() => setMineStageOverride(null)}
+                    onClick={() => setDemoLevel(null)}
                     className={`h-6 w-8 rounded-lg text-[10px] font-semibold transition ${
-                      mineStageOverride === null ? 'bg-lime-300 text-emerald-950' : 'text-white/70'
+                      demoLevel === null ? 'bg-lime-300 text-emerald-950' : 'text-white/70'
                     }`}
                   >
                     Авто
@@ -570,9 +566,9 @@ export function MapScreen({
                       key={st.level}
                       type="button"
                       title={st.title}
-                      onClick={() => setMineStageOverride(st.level)}
+                      onClick={() => setDemoLevel(st.level)}
                       className={`h-6 w-8 rounded-lg text-[10px] font-semibold transition ${
-                        mineStageOverride === st.level ? 'bg-lime-300 text-emerald-950' : 'text-white/70'
+                        demoLevel === st.level ? 'bg-lime-300 text-emerald-950' : 'text-white/70'
                       }`}
                     >
                       {st.level}
@@ -634,8 +630,17 @@ export function MapScreen({
                   />
                 </div>
                 <p className="mt-1.5 text-[11px] text-white/45">
-                  Сейчас: {insideStageTitle} (стадия {insideStage} из {MINE_STAGES.length})
+                  Сейчас: {insideStageTitle} (уровень {insideLevel} из {MAX_LEVEL})
                 </p>
+                {/* забыл включить/выключить таймер — поправить часы руками */}
+                <div className="mt-2 flex justify-end">
+                  <TimeAdjustButton
+                    category={insideCat}
+                    totalSeconds={totals.get(insideCat.id) ?? 0}
+                    onChanged={loadAll}
+                    className="flex items-center gap-1.5 text-[12px] font-medium text-white/55"
+                  />
+                </div>
               </div>
 
               {insideTasks.length > 0 && (

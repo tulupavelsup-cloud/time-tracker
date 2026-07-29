@@ -1,51 +1,119 @@
 /**
- * ВНУТРЕННОСТИ ШАХТЫ в 3D — полноэкранная изо-диорама в том же наклоне, что и
- * карта (см. HomeScene). Камера зафиксирована: ни зума, ни вращения — только
- * сцена и живой персонаж.
+ * ВНУТРЕННОСТИ ШАХТЫ в 3D — полноэкранная диорама в том же наклоне, что и карта
+ * (см. HomeScene). Камера зафиксирована: ни зума, ни вращения — только сцена и
+ * живой персонаж.
  *
- * 10 стадий по референсу «внутренняя эволюция шахты» (пороги — MINE_STAGES
- * в lib/thresholds.ts), всё наращивается поверх предыдущего:
- *   1 Нора             — тесная тёмная нора, фонарь, герой с киркой
- *   2 Штрек            — рельсы и деревянная вагонетка, нора расширилась
- *   3 Первая жила      — крепь, верстак, первые бирюзовые кристаллы
- *   4 Крепь            — деревянный портал, конвейер с рудой, ящики, табличка
- *   5 Подъёмник        — каменный пол-плитка, лебёдка с корзиной, вторая вагонетка
- *   6 Кристальный зал  — второй ярус с лестницей, огромные кристаллы
- *   7 Механизация      — трубы, вентили, приборы и стол-пульт
- *   8 Плавильня        — печь с огненным кристаллом, жёлоб расплава, мостки
- *   9 Артель           — напарники за верстаками, фиолетовые кристаллы
- *  10 Сердце горы      — гигантский кристалл на постаменте, полярное сияние
+ * Кадр вертикальный (телефон), поэтому зал построен как штрек, уходящий вглубь
+ * по −z: камера стоит на оси штрека и смотрит вдоль него сверху под ~39°. Слева
+ * и справа — стены (x = ±HALF_W), над дальней частью — свод, в торце — забой.
+ * Ближняя часть свода срезана: туда мы «проваливаемся» сверху.
+ *
+ * Уровни — ТЕ ЖЕ, что снаружи (MINE_STAGES = ZONE_LEVELS, 0..6): раньше внутри
+ * жила своя шкала на 10 стадий, и цифры снаружи/внутри не сходились. Всё
+ * наращивается поверх предыдущего:
+ *   0 Нора            — тесная тёмная нора, фонарь, герой с киркой
+ *   1 Штрек           — рельсы, устье тоннеля в торце и вагонетка-челнок
+ *   2 Первая жила     — крепь, лебёдка, первые бирюзовые кристаллы
+ *   3 Крепь           — второй портал, конвейер поперёк штрека, ящики, табличка
+ *   4 Подъёмник       — каменная плитка пола, верстак, запасная вагонетка
+ *   5 Кристальный зал — балкон на стене с лестницей, кристаллы, трубы и приборы
+ *   6 Сердце горы     — плавильня, артель напарников, гигантский кристалл, сияние
  *
  * active (идёт таймер) — герой долбит киркой (осколки, вспышка), изредка
- * вытирает лоб и кидает руду в вагонетку; вагонетки катятся, механизмы крутятся,
- * огонь ярче. Без таймера герой опирается на кирку, а шахта дремлет.
+ * вытирает лоб и кидает руду в вагонетку; вагонетка увозит руду в тоннель и
+ * возвращается пустой, механизмы крутятся, огонь ярче. Без таймера герой
+ * опирается на кирку, а шахта дремлет.
  */
 
 import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
+import { MAX_LEVEL } from '../lib/thresholds';
 import { Character3D } from './Character3D';
 import { Barrel, Cart, Crate, Crystal, CrystalSpike, Rock, Sign, Timber } from './Mine3D';
 
-/* ───────────────────────── общая геометрия сцены ───────────────────────── */
+/* ───────────────────────── общая геометрия штрека ───────────────────────── */
+
+/** Половина ширины штрека на «Норе» и «Штреке»: внутренние грани боковых стен. */
+const HALF_W = 1.75;
+/** Высота стен и торца — с запасом, чтобы порода закрывала верх кадра. */
+const WALL_H = 8;
+/** Ближний край пола: он уже за нижней кромкой кадра. */
+const NEAR_Z = 1.6;
+/**
+ * Ось рельсов по x (правая половина штрека). Не у самой стены: по рельсам ходит
+ * вагонетка, и у правого края кадра её резало пополам.
+ */
+const RAIL_X = 0.85;
 
 /**
- * Куда смотрит камера и откуда. Наклон ~40° над горизонтом — тот же, что у
- * карты; экран телефона узкий, поэтому вся сцена уложена в полосу x ≈ ±2.6, а
- * «вглубь» уходит по z.
+ * Куда смотрит камера и откуда. Наклон ~41° над горизонтом — тот же, что у
+ * карты, но камера стоит почти на оси штрека, поэтому стены сходятся к торцу.
  */
-const CAM_TARGET = new THREE.Vector3(0, 1.5, -1.0);
-const CAM_OFFSET = new THREE.Vector3(6.15, 9.0, 8.78);
+const CAM_TARGET = new THREE.Vector3(-0.1, 1.8, -2.6);
+const CAM_OFFSET = new THREE.Vector3(0.5, 6.2, 7.2);
 
-/** Где стоит герой и куда бьёт киркой. */
-const HERO: [number, number, number] = [-0.9, 0, -2.1];
-const HERO_YAW = 2.75;
-const VEIN: [number, number, number] = [-1.15, 1.3, -3.45];
+/** Герой стоит слева у забоя вполоборота к зрителю. */
+const HERO: [number, number, number] = [-0.6, 0, -1.6];
+const HERO_YAW = -1.13;
+/** Жила, по которой он лупит — выступ левой стены прямо перед ним. */
+const VEIN: [number, number, number] = [-1.35, 1.3, -1.25];
 /** Рука героя (откуда летит кусок руды) и вагонетка, куда он летит. */
-const HAND: [number, number, number] = [-1.2, 1.05, -1.8];
-const CART_SPOT: [number, number, number] = [1.4, 0.62, -0.5];
-/** Линия рельсов по z. */
-const RAIL_Z = -0.5;
+const HAND: [number, number, number] = [-1, 1.08, -1.4];
+/** Где стоит вагонетка под погрузкой: рядом с героем, в кадре целиком. */
+const CART_SPOT: [number, number, number] = [RAIL_X, 0.62, -1.8];
+/** Насколько поворачивается к зрителю (вытирает лоб) и к вагонетке (бросок). */
+const FACE_YAW = 1.29;
+const TOSS_YAW = 2.33;
+
+/**
+ * Насколько выработка разрослась: 0 на «Норе» и «Штреке», 1 на «Сердце горы».
+ * Нора и штрек остаются тем же тесным прямоугольником, что и были, а дальше зал
+ * раздаётся вширь, ввысь и вглубь — тем сильнее, чем выше уровень.
+ */
+const growth = (level: number) => THREE.MathUtils.clamp((level - 1) / (MAX_LEVEL - 1), 0, 1);
+const grow = (level: number, from: number, to: number) => THREE.MathUtils.lerp(from, to, growth(level));
+
+/** Половина ширины зала: внутренние грани боковых стен. */
+const halfWFor = (level: number) => grow(level, HALF_W, 2.4);
+/** Глубина торца: чем выше уровень, тем дальше пробит штрек. */
+const backFor = (level: number) => (level <= 0 ? -4.2 : grow(level, -5, -9.3));
+/**
+ * Высота свода и место, где он обрывается ближе к камере. Свод тонкий: камера
+ * смотрит на него сверху, и толстая плита закрывала бы треть кадра глухим
+ * тёмным торцом вместо породы.
+ *
+ * Оба размера растут с уровнем, и это главный рычаг «зал становится больше»:
+ * верхнюю полосу кадра занимает порода над сводом, а её нижняя граница — луч из
+ * камеры по кромке среза. Выше свод и дальше срез → граница уползает вверх, и
+ * открытого зала в кадре становится всё больше (с 32% высоты кадра до ~12%).
+ */
+const ceilFor = (level: number) => (level <= 0 ? 3.6 : grow(level, 4, 5.4));
+const ceilNearFor = (level: number) => grow(level, -1.6, -3.8);
+/** Толщина плиты свода. */
+const CEIL_T = 0.7;
+/**
+ * Отъезд камеры. Растёт МЕДЛЕННЕЕ зала (×1.3 против ×1.9 по глубине): если бы
+ * камера отъезжала вровень с ростом, кадр на всех уровнях был бы одинаковым.
+ * Из-за отставания стены к 6-му уровню расходятся за края кадра, а герой на
+ * фоне зала делается всё мельче.
+ */
+const camFor = (level: number) => grow(level, 1, 1.3);
+
+/**
+ * Где стоят рамы крепи. Раньше их было две с прибитыми координатами, и обе
+ * оказывались не там: ближняя перечёркивала кадр поперёк ровно посередине, а
+ * дальняя на 3-м уровне утыкалась в торец. Теперь крепь идёт РИТМОМ: первая
+ * рама поодаль от героя, дальше через равный пролёт, пока не упрёмся в забой.
+ * Чем глубже пробит штрек, тем больше рам — и он читается уходящим вглубь.
+ */
+const TIMBER_FIRST = -3.4;
+const TIMBER_STEP = 2.6;
+const timberZs = (back: number) => {
+  const out: number[] = [];
+  for (let z = TIMBER_FIRST; z > back + 0.5; z -= TIMBER_STEP) out.push(z);
+  return out;
+};
 
 /** Псевдослучайное 0..1 по индексу — стабильно между рендерами. */
 const rnd = (i: number) => {
@@ -60,144 +128,188 @@ interface Palette {
   crystal: 'none' | 'cyan' | 'violet';
 }
 
-function paletteFor(stage: number): Palette {
-  if (stage <= 2) {
+function paletteFor(level: number): Palette {
+  if (level <= 1) {
     return {
-      wall: ['#8a7359', '#7a6449', '#9a8265', '#6b573f'],
-      floor: '#5b4a38',
-      floorTop: '#6d5943',
+      wall: ['#7d6750', '#6d5942', '#8c7660', '#5f4d39'],
+      floor: '#4f4030',
+      floorTop: '#61503c',
       crystal: 'none',
     };
   }
-  if (stage <= 6) {
+  if (level <= 4) {
     return {
-      wall: ['#8e98a7', '#7d8794', '#9ba5b3', '#6b7583'],
-      floor: '#59616e',
-      floorTop: '#69717e',
+      wall: ['#7f8894', '#6f7884', '#8d95a1', '#5f6874'],
+      floor: '#4c525d',
+      floorTop: '#5c626d',
       crystal: 'cyan',
     };
   }
-  if (stage <= 8) {
+  if (level <= 5) {
     return {
-      wall: ['#8d8a92', '#7c7981', '#9c98a0', '#6b6870'],
-      floor: '#575360',
-      floorTop: '#67626f',
+      wall: ['#7e7b84', '#6e6b74', '#8d8992', '#5e5b64'],
+      floor: '#4a4753',
+      floorTop: '#585462',
       crystal: 'cyan',
     };
   }
   return {
-    wall: ['#8b83a4', '#7a7293', '#9a92b3', '#6a6282'],
-    floor: '#565073',
-    floorTop: '#655e80',
+    wall: ['#7c7594', '#6c6584', '#8b83a4', '#5c5574'],
+    floor: '#484366',
+    floorTop: '#565073',
     crystal: 'violet',
   };
 }
 
-/** Ширина зала растёт вместе со стадией — на первых уровнях это тесная нора. */
-function roomWidth(stage: number): number {
-  if (stage <= 1) return 3.2;
-  if (stage <= 2) return 4.6;
-  if (stage <= 4) return 6.4;
-  return 7.4;
+/* ───────────────────────── оболочка штрека ───────────────────────── */
+
+interface Chunk {
+  p: [number, number, number];
+  s: [number, number, number];
+  r: [number, number, number];
+  c: string;
 }
 
-/* ───────────────────────── оболочка пещеры ───────────────────────── */
-
-/** Стены, пол и потолок из гранёных глыб. Справа и спереди — срез (камера). */
-function CaveShell({ stage }: { stage: number }) {
-  const pal = paletteFor(stage);
-  const w = roomWidth(stage);
-  const halfW = w / 2;
+/**
+ * Стены, пол, свод и торец. Порода — гранёные глыбы поверх сплошных плит:
+ * плиты гарантируют, что фон нигде не просвечивает, глыбы дают силуэт пещеры.
+ */
+function CaveShell({ level }: { level: number }) {
+  const pal = paletteFor(level);
+  const halfW = halfWFor(level);
+  const back = backFor(level);
+  const ceilY = ceilFor(level);
+  const ceilNear = ceilNearFor(level);
 
   const chunks = useMemo(() => {
-    const out: { p: [number, number, number]; s: [number, number, number]; r: [number, number, number]; c: string }[] = [];
+    const out: Chunk[] = [];
     let i = 0;
     const push = (p: [number, number, number], base: number) => {
       const k = rnd(i++);
       const k2 = rnd(i++);
       out.push({
         p,
-        s: [base * (0.9 + k * 0.5), base * (0.85 + k2 * 0.6), base * (0.9 + k * 0.4)],
+        s: [base * (0.85 + k * 0.5), base * (0.8 + k2 * 0.55), base * (0.85 + k * 0.45)],
         r: [k * 1.4, k2 * 3.1, k * 0.9],
         c: pal.wall[Math.floor(k * pal.wall.length) % pal.wall.length],
       });
     };
-    // задняя стена
-    for (let x = -halfW - 0.6; x <= halfW + 0.6; x += 1.2) {
-      for (let y = -0.2; y <= 4.6; y += 1.1) {
-        push([x + (rnd(i) - 0.5) * 0.5, y, -4.2 - rnd(i + 5) * 0.5], 1.5);
-      }
-    }
-    // левая стена
-    for (let z = -4.2; z <= 3.4; z += 1.2) {
-      for (let y = -0.2; y <= 4.6; y += 1.1) {
-        push([-halfW - 0.5 - rnd(i + 9) * 0.5, y, z + (rnd(i) - 0.5) * 0.5], 1.5);
-      }
-    }
-    // потолок (нависает только над задней частью зала — верх кадра)
-    for (let x = -halfW - 0.4; x <= halfW; x += 1.4) {
-      for (let z = -4.2; z <= -1.4; z += 1.4) {
-        push([x + (rnd(i) - 0.5) * 0.6, 4.5 + rnd(i + 3) * 0.4, z], 1.7);
-      }
-    }
-    // на первых стадиях нора тесная: закрываем правый и передний край
-    if (stage <= 2) {
-      for (let z = -4; z <= 2.6; z += 1.2) {
-        for (let y = -0.2; y <= 4.2; y += 1.1) {
-          push([halfW + 0.5 + rnd(i + 7) * 0.4, y, z], 1.5);
+    // Ряды глыб по высоте: внизу мельче, наверху крупнее. Верхние ряды нужны
+    // даже там, где они выше свода: камера смотрит сверху и верхнюю треть кадра
+    // занимает именно порода над штреком — без них там глухая темнота.
+    // Глыбы крупнее шага раскладки — иначе между ними видны щели и порода
+    // читается как россыпь отдельных камней, а не как массив.
+    const rows: [number, number][] = [
+      [0.15, 1],
+      [1.2, 1.15],
+      [2.4, 1.3],
+      [3.8, 1.5],
+      [5.4, 1.65],
+      [6.9, 1.8],
+    ];
+    // боковые стены
+    for (const sign of [-1, 1]) {
+      for (let z = NEAR_Z; z >= back - 0.4; z -= 1.25) {
+        for (const [y, base] of rows) {
+          push([sign * (halfW + 0.55 + rnd(i + 3) * 0.3), y + (rnd(i + 5) - 0.5) * 0.35, z + (rnd(i + 7) - 0.5) * 0.5], base);
         }
       }
-      for (let x = -halfW; x <= halfW; x += 1.3) {
-        push([x, 3.6 + rnd(i + 2) * 0.6, 2.6], 1.6);
+    }
+    // торец (забой)
+    for (let x = -halfW - 0.3; x <= halfW + 0.3; x += 1.05) {
+      for (const [y, base] of rows) {
+        push([x + (rnd(i + 11) - 0.5) * 0.5, y + (rnd(i + 13) - 0.5) * 0.35, back - 0.45 - rnd(i + 17) * 0.28], base);
       }
     }
+    // Горная масса поверх свода — верхняя часть кадра. Начинается на полметра
+    // вглубь от среза: глыбы, нависающие над кромкой, закрывали бы перспективу
+    // штрека и «съедали» треть кадра.
+    for (let z = ceilNear - 0.9; z >= back; z -= 1.2) {
+      for (let x = -halfW + 0.2; x <= halfW - 0.2; x += 1.15) {
+        push([x + (rnd(i + 19) - 0.5) * 0.5, ceilY + CEIL_T * 0.6 + rnd(i + 23) * 0.4, z - rnd(i + 29) * 0.4], 1.45);
+      }
+    }
+    // «козырёк» на срезе свода — чтобы обрыв не читался прямой линией
+    for (let x = -halfW + 0.2; x <= halfW - 0.2; x += 0.9) {
+      push([x + (rnd(i + 31) - 0.5) * 0.4, ceilY - 0.15 + rnd(i + 37) * 0.25, ceilNear + 0.1], 1.15);
+    }
     return out;
-  }, [pal, halfW, stage]);
+  }, [pal, halfW, back, ceilY, ceilNear]);
 
-  const stalactites = useMemo(
+  const spikes = useMemo(
     () =>
-      Array.from({ length: stage <= 2 ? 4 : 8 }, (_, k) => ({
-        x: -halfW + rnd(k * 3 + 1) * w,
-        z: -3.9 + rnd(k * 3 + 2) * 2.4,
-        h: 0.5 + rnd(k * 3 + 3) * 0.9,
+      Array.from({ length: 7 }, (_, k) => ({
+        x: (k % 2 === 0 ? -1 : 1) * (halfW - 0.15 - rnd(k * 5 + 1) * 0.3),
+        y: ceilY - 0.35,
+        z: ceilNear - 0.4 - rnd(k * 5 + 2) * (ceilNear - back - 0.8),
+        h: 0.45 + rnd(k * 5 + 3) * 0.7,
       })),
-    [halfW, w, stage],
+    [halfW, ceilY, ceilNear, back],
   );
 
+  // обломков тем больше, чем крупнее зал — иначе пол большого зала пустеет
   const rubble = useMemo(
     () =>
-      Array.from({ length: 14 }, (_, k) => ({
-        p: [-halfW + rnd(k + 40) * w, 0.06, -3.7 + rnd(k + 60) * 5.4] as [number, number, number],
-        s: 0.14 + rnd(k + 80) * 0.22,
+      Array.from({ length: Math.round(16 * (halfW / HALF_W)) }, (_, k) => ({
+        p: [-halfW + 0.25 + rnd(k + 40) * (halfW * 2 - 0.5), 0.06, back + 0.4 + rnd(k + 60) * (NEAR_Z - back - 0.8)] as [
+          number,
+          number,
+          number,
+        ],
+        s: 0.12 + rnd(k + 80) * 0.2,
         r: [rnd(k) * 3, rnd(k + 1) * 3, rnd(k + 2) * 3] as [number, number, number],
       })),
-    [halfW, w],
+    [halfW, back],
   );
+
+  const floorLen = NEAR_Z - back + 2;
+  const floorMid = (NEAR_Z + back - 2) / 2;
+  const wallLen = NEAR_Z - back + 1.4;
+  const wallMid = (NEAR_Z + back - 1.4) / 2;
+  const ceilLen = ceilNear - back + 1.2;
+  const ceilMid = (ceilNear + back - 1.2) / 2;
 
   return (
     <group>
-      {/* пол */}
-      <mesh receiveShadow position={[0, -0.35, -0.4]}>
-        <boxGeometry args={[w + 3, 0.7, 10]} />
+      {/* сплошные плиты — глухая коробка без щелей */}
+      <mesh receiveShadow position={[0, -0.4, floorMid]}>
+        <boxGeometry args={[halfW * 2 + 4, 0.8, floorLen]} />
         <meshStandardMaterial color={pal.floor} roughness={1} />
       </mesh>
-      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, -0.4]}>
-        <planeGeometry args={[w + 3, 10]} />
+      <mesh receiveShadow rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.001, floorMid]}>
+        <planeGeometry args={[halfW * 2, floorLen]} />
         <meshStandardMaterial color={pal.floorTop} roughness={1} />
       </mesh>
+      {[-1, 1].map((sign) => (
+        <mesh key={sign} position={[sign * (halfW + 1), WALL_H / 2 - 0.4, wallMid]}>
+          <boxGeometry args={[2, WALL_H, wallLen]} />
+          <meshStandardMaterial color={pal.wall[1]} roughness={1} />
+        </mesh>
+      ))}
+      <mesh position={[0, WALL_H / 2 - 0.4, back - 1]}>
+        <boxGeometry args={[halfW * 2 + 4, WALL_H, 2]} />
+        <meshStandardMaterial color={pal.wall[1]} roughness={1} />
+      </mesh>
+      {ceilLen > 0.5 && (
+        <mesh position={[0, ceilY + CEIL_T / 2, ceilMid]}>
+          <boxGeometry args={[halfW * 2, CEIL_T, ceilLen]} />
+          <meshStandardMaterial color={pal.wall[0]} roughness={1} />
+        </mesh>
+      )}
 
-      {/* каменная кладка стен и потолка */}
+      {/* Гранёная порода поверх плит. Детализация 1, а не 0: у крупных глыб
+          20 граней читаются как гигантские кристаллы, а не как камень. */}
       {chunks.map((c, k) => (
-        <mesh key={k} castShadow receiveShadow position={c.p} scale={c.s} rotation={c.r}>
-          <icosahedronGeometry args={[0.5, 0]} />
+        <mesh key={k} position={c.p} scale={c.s} rotation={c.r}>
+          <icosahedronGeometry args={[0.5, 1]} />
           <meshStandardMaterial color={c.c} roughness={1} flatShading />
         </mesh>
       ))}
 
-      {/* сталактиты */}
-      {stalactites.map((s, k) => (
-        <mesh key={k} castShadow position={[s.x, 4.2 - s.h / 2, s.z]} rotation={[Math.PI, 0, 0]}>
-          <coneGeometry args={[0.16, s.h, 6]} />
+      {/* каменные зубья со свода */}
+      {spikes.map((s, k) => (
+        <mesh key={k} position={[s.x, s.y - s.h / 2, s.z]} rotation={[Math.PI, 0, (rnd(k) - 0.5) * 0.4]}>
+          <coneGeometry args={[0.15, s.h, 6]} />
           <meshStandardMaterial color={pal.wall[3]} roughness={1} flatShading />
         </mesh>
       ))}
@@ -207,33 +319,34 @@ function CaveShell({ stage }: { stage: number }) {
         <Rock key={k} position={r.p} scale={r.s} rot={r.r} color={pal.wall[1]} />
       ))}
 
-      {/* каменная плитка пола (со стадии 5) */}
-      {stage >= 5 && <HexFloor color={pal.floorTop} />}
+      {/* каменная плитка пола (с уровня 4) */}
+      {level >= 4 && <HexFloor color={pal.floorTop} halfW={halfW} back={back} />}
     </group>
   );
 }
 
-/** Шестиугольная плитка в центре зала — «обжитой» пол с 5-й стадии. */
-function HexFloor({ color }: { color: string }) {
+/** Шестиугольная плитка вдоль штрека — «обжитой» пол с 4-го уровня. */
+function HexFloor({ color, halfW, back }: { color: string; halfW: number; back: number }) {
   const tiles = useMemo(() => {
     const out: { p: [number, number, number]; c: string }[] = [];
-    const R = 0.62;
-    for (let q = -4; q <= 4; q++) {
-      for (let r = -3; r <= 3; r++) {
-        const x = R * 1.72 * (q + r / 2);
-        const z = R * 1.5 * r - 0.6;
-        if (Math.hypot(x, z + 0.6) > 4.4) continue;
-        const k = rnd(q * 17 + r * 31);
-        out.push({ p: [x, 0.03, z], c: k > 0.66 ? '#4e5866' : k > 0.33 ? color : '#3f4854' });
+    const R = 0.58;
+    const stepX = R * 1.72;
+    // рядами со смещением через один — шестиугольники ложатся в соты
+    for (let r = -1; 1.2 - R * 1.5 * r > back + 0.5; r++) {
+      const z = 1.2 - R * 1.5 * r;
+      let q = 0;
+      for (let x = -halfW + 0.35 + (r % 2 ? stepX / 2 : 0); x <= halfW - 0.35; x += stepX) {
+        const k = rnd(q++ * 17 + r * 31);
+        out.push({ p: [x, 0.03, z], c: k > 0.66 ? '#4b5460' : k > 0.33 ? color : '#3d4650' });
       }
     }
     return out;
-  }, [color]);
+  }, [color, halfW, back]);
   return (
     <group>
       {tiles.map((t, i) => (
         <mesh key={i} receiveShadow position={t.p} rotation={[0, Math.PI / 6, 0]}>
-          <cylinderGeometry args={[0.6, 0.6, 0.06, 6]} />
+          <cylinderGeometry args={[0.56, 0.56, 0.06, 6]} />
           <meshStandardMaterial color={t.c} roughness={1} flatShading />
         </mesh>
       ))}
@@ -247,7 +360,7 @@ function HexFloor({ color }: { color: string }) {
 function Lantern({ position, intensity = 1.1 }: { position: [number, number, number]; intensity?: number }) {
   const light = useRef<THREE.PointLight>(null);
   useFrame((s) => {
-    if (light.current) light.current.intensity = intensity * 1.8 * (0.85 + Math.sin(s.clock.elapsedTime * 7 + position[0]) * 0.12);
+    if (light.current) light.current.intensity = intensity * 2.2 * (0.85 + Math.sin(s.clock.elapsedTime * 7 + position[2]) * 0.12);
   });
   return (
     <group position={position}>
@@ -255,9 +368,9 @@ function Lantern({ position, intensity = 1.1 }: { position: [number, number, num
         <torusGeometry args={[0.07, 0.014, 8, 16]} />
         <meshStandardMaterial color="#6c5a44" metalness={0.5} roughness={0.5} />
       </mesh>
-      <mesh castShadow position={[0, 0.06, 0]}>
+      <mesh position={[0, 0.06, 0]}>
         <cylinderGeometry args={[0.13, 0.15, 0.3, 10]} />
-        <meshStandardMaterial color="#ffd88a" emissive="#ffab3d" emissiveIntensity={1.7} roughness={0.4} />
+        <meshStandardMaterial color="#ffd88a" emissive="#ffab3d" emissiveIntensity={1.8} roughness={0.4} />
       </mesh>
       <mesh position={[0, 0.24, 0]}>
         <cylinderGeometry args={[0.11, 0.14, 0.1, 10]} />
@@ -267,82 +380,88 @@ function Lantern({ position, intensity = 1.1 }: { position: [number, number, num
         <cylinderGeometry args={[0.14, 0.11, 0.08, 10]} />
         <meshStandardMaterial color="#7a6549" metalness={0.5} roughness={0.5} />
       </mesh>
-      <pointLight ref={light} color="#ffbf6e" intensity={intensity * 1.8} distance={9} decay={2} />
+      <pointLight ref={light} color="#ffbf6e" intensity={intensity * 2.2} distance={9} decay={2} />
     </group>
   );
 }
 
-/** Свет сцены: общий полумрак + тёплый ключ + холодная подсветка кристаллов. */
-function Lights({ stage, active }: { stage: number; active: boolean }) {
-  const pal = paletteFor(stage);
+/** Свет сцены: полумрак штрека + тёплый ключ и холодная подсветка кристаллов. */
+function Lights({ level, back, halfW }: { level: number; back: number; halfW: number }) {
+  const pal = paletteFor(level);
   const crystalColor = pal.crystal === 'violet' ? '#b98bff' : '#5fdcea';
-  const crystalPower = pal.crystal === 'none' ? 0 : Math.min(2.2, 0.5 + (stage - 2) * 0.32);
+  const crystalPower = pal.crystal === 'none' ? 0 : Math.min(2.2, 0.6 + (level - 2) * 0.5);
   return (
     <>
-      <ambientLight intensity={stage <= 2 ? 0.8 : 0.95} color="#a8bcd4" />
-      <hemisphereLight args={['#bcd0e6', '#5b4a38', 0.7]} />
-      {/* ключевой свет со стороны камеры — чтобы диорама читалась */}
+      <ambientLight intensity={level <= 1 ? 0.62 : 0.72} color="#9db2cc" />
+      <hemisphereLight args={['#b6c8de', '#4a3a2a', 0.75]} />
+      {/* ключевой свет со стороны камеры — чтобы штрек читался в объёме.
+          Область теней растянута под размер зала, иначе на верхних уровнях
+          дальняя половина выпадает из карты теней. */}
       <directionalLight
-        position={[7, 11, 8]}
-        intensity={stage <= 2 ? 1.2 : 1.5}
-        color="#ffe8c4"
+        position={[3.5, 8, 7]}
+        intensity={level <= 1 ? 0.95 : 1.15}
+        color="#ffe6c2"
         castShadow
         shadow-mapSize-width={1024}
         shadow-mapSize-height={1024}
         shadow-bias={-0.0006}
         shadow-camera-near={1}
-        shadow-camera-far={40}
-        shadow-camera-left={-9}
-        shadow-camera-right={9}
-        shadow-camera-top={9}
-        shadow-camera-bottom={-9}
+        shadow-camera-far={36 - back}
+        shadow-camera-left={-halfW - 4}
+        shadow-camera-right={halfW + 4}
+        shadow-camera-top={8 - back}
+        shadow-camera-bottom={back - 8}
       />
-      {/* холодная подсветка с теневой стороны — объём, как на карте */}
-      <directionalLight position={[-6, 7, -5]} intensity={0.45} color="#b6d2ff" />
+      {/* холодная подсветка из глубины — отделяет стены от торца */}
+      <directionalLight position={[-4, 6, back - 3]} intensity={0.35} color="#9ec4ff" />
+      {/* мягкая заливка сверху-сзади: порода над сводом занимает верх кадра */}
+      <directionalLight position={[-2, 11, 3]} intensity={0.5} color="#c3d3e6" />
       {/* мягкий свет на героя, чтобы он не тонул в породе */}
-      <pointLight position={[HERO[0] + 1.2, 2.4, HERO[2] + 1.6]} color="#ffe3bb" intensity={1.4} distance={7} decay={2} />
+      <pointLight position={[HERO[0] + 1.1, 2.3, HERO[2] + 1.7]} color="#ffe3bb" intensity={1.7} distance={7} decay={2} />
       {/* холодное свечение жилы */}
       {crystalPower > 0 && (
-        <pointLight position={[VEIN[0], VEIN[1] + 0.4, VEIN[2] + 0.8]} color={crystalColor} intensity={crystalPower} distance={10} decay={2} />
+        <pointLight position={[VEIN[0] + 0.5, VEIN[1] + 0.3, VEIN[2]]} color={crystalColor} intensity={crystalPower} distance={9} decay={2} />
       )}
-      {/* зарево печи */}
-      {stage >= 8 && <pointLight position={[1.9, 1.6, 0.7]} color="#ff8a3c" intensity={active ? 2.4 : 1.5} distance={11} decay={2} />}
-      {/* сияние Сердца горы */}
-      {stage >= 10 && <pointLight position={[0.9, 2.6, -3.3]} color="#9fd8ff" intensity={2.6} distance={14} decay={2} />}
     </>
   );
 }
 
 /* ───────────────────────── жила, по которой лупит герой ───────────────────────── */
 
-function Vein({ stage }: { stage: number }) {
-  const pal = paletteFor(stage);
-  const gold = stage >= 8;
+function Vein({ level, halfW }: { level: number; halfW: number }) {
+  const pal = paletteFor(level);
+  const gold = level >= MAX_LEVEL;
+  // Выступ тянется от левой стены к точке, по которой лупит герой: сам герой
+  // и жила стоят на месте на всех уровнях, а стена с ростом зала уезжает — без
+  // растяжки выступ повис бы в воздухе посреди зала.
+  const far = -(halfW + 0.42);
+  const near = -1.03;
   const shards = useMemo(
     () =>
-      Array.from({ length: stage <= 2 ? 3 : Math.min(9, 2 + stage) }, (_, i) => ({
-        p: [VEIN[0] + (rnd(i) - 0.5) * 1.5, VEIN[1] + (rnd(i + 20) - 0.5) * 1.5, VEIN[2] + 0.35 + rnd(i + 40) * 0.2] as [
+      Array.from({ length: level <= 1 ? 3 : Math.min(9, 3 + level) }, (_, i) => ({
+        p: [VEIN[0] + 0.16 + rnd(i + 40) * 0.18, VEIN[1] + (rnd(i + 20) - 0.5) * 1.4, VEIN[2] + (rnd(i) - 0.5) * 1.6] as [
           number,
           number,
           number,
         ],
-        s: 0.45 + rnd(i + 60) * 0.5,
-        rot: [Math.PI / 2 + (rnd(i + 80) - 0.5) * 0.8, 0, (rnd(i + 90) - 0.5) * 1.2] as [number, number, number],
+        // мельче, чем раньше: крупные кристаллы загораживали самого героя
+        s: 0.3 + rnd(i + 60) * 0.3,
+        rot: [(rnd(i + 80) - 0.5) * 0.8, 0, -Math.PI / 2 + (rnd(i + 90) - 0.5) * 0.9] as [number, number, number],
       })),
-    [stage],
+    [level],
   );
   return (
     <group>
-      {/* тёмная порода вокруг жилы */}
-      <mesh position={[VEIN[0], VEIN[1], VEIN[2] + 0.2]} scale={[1.5, 1.4, 0.5]} rotation={[0, 0.3, 0.2]}>
-        <icosahedronGeometry args={[0.9, 0]} />
-        <meshStandardMaterial color={stage <= 2 ? '#2b221a' : '#2f3742'} roughness={1} flatShading />
+      {/* выступ породы, в который врубается герой */}
+      <mesh position={[(far + near) / 2, VEIN[1], VEIN[2]]} scale={[(near - far) / 2 / 0.95, 1.5, 1.5]} rotation={[0.2, 0.3, 0]}>
+        <icosahedronGeometry args={[0.95, 0]} />
+        <meshStandardMaterial color={level <= 1 ? '#48392a' : '#4b5460'} roughness={1} flatShading />
       </mesh>
       {shards.map((s, i) =>
         pal.crystal === 'none' ? (
-          <mesh key={i} castShadow position={s.p} scale={s.s * 0.4} rotation={s.rot}>
+          <mesh key={i} position={s.p} scale={s.s * 0.42} rotation={s.rot}>
             <icosahedronGeometry args={[1, 0]} />
-            <meshStandardMaterial color="#6b5a3f" roughness={1} flatShading />
+            <meshStandardMaterial color="#7d6a4b" roughness={1} flatShading />
           </mesh>
         ) : (
           <Crystal key={i} position={s.p} h={s.s} r={s.s * 0.28} rot={s.rot} gold={gold && i % 3 === 0} />
@@ -352,62 +471,117 @@ function Vein({ stage }: { stage: number }) {
   );
 }
 
-/* ───────────────────────── рельсы, вагонетки, ящики ───────────────────────── */
+/* ───────────────────────── рельсы, вагонетки, устье ───────────────────────── */
 
-function Rails({ from = -5.5, to = 6.5 }: { from?: number; to?: number }) {
-  const len = to - from;
+function Rails({ from, to }: { from: number; to: number }) {
+  const len = from - to;
   const ties = useMemo(() => {
-    const n = Math.round(len / 0.55);
-    return Array.from({ length: n }, (_, i) => from + (i * len) / (n - 1));
+    const n = Math.max(2, Math.round(len / 0.55));
+    return Array.from({ length: n }, (_, i) => from - (i * len) / (n - 1));
   }, [from, len]);
   return (
-    <group position={[0, 0.06, RAIL_Z]}>
-      {[-0.34, 0.34].map((z) => (
-        <mesh key={z} position={[(from + to) / 2, 0.07, z]}>
-          <boxGeometry args={[len, 0.07, 0.08]} />
+    <group position={[RAIL_X, 0.06, 0]}>
+      {[-0.3, 0.3].map((x) => (
+        <mesh key={x} position={[x, 0.07, (from + to) / 2]}>
+          <boxGeometry args={[0.08, 0.07, len]} />
           <meshStandardMaterial color="#5a5d66" metalness={0.55} roughness={0.45} />
         </mesh>
       ))}
-      {ties.map((x, i) => (
-        <mesh key={i} receiveShadow position={[x, 0.01, 0]}>
-          <boxGeometry args={[0.16, 0.08, 0.95]} />
-          <meshStandardMaterial color="#5a4632" roughness={0.95} />
+      {ties.map((z, i) => (
+        <mesh key={i} receiveShadow position={[0, 0.01, z]}>
+          <boxGeometry args={[0.86, 0.08, 0.16]} />
+          <meshStandardMaterial color="#54422f" roughness={0.95} />
         </mesh>
       ))}
     </group>
   );
 }
 
-/** Вагонетка, которая катится по рельсам, пока идёт работа. */
-function RollingCart({ active, offset = 0, ore = true }: { active: boolean; offset?: number; ore?: boolean }) {
+/* Фазы челнока, секунды: стоит под погрузкой у героя → увозит руду в тоннель →
+   пропадает в темноте → возвращается пустой. */
+const CART_LOAD = 9;
+const CART_OUT = 4.6;
+const CART_DARK = 2;
+/** Плечо челнока на 1-м уровне: дальше зал глубже, и ход растягивается по времени. */
+const CART_RUN = 3.8;
+const ease = (u: number) => u * u * (3 - 2 * u);
+
+/**
+ * Вагонетка-челнок: стоит рядом с героем под погрузкой, потом увозит руду в
+ * тоннель и возвращается пустой. Из кадра не уезжает и нигде не «телепортится» —
+ * её просто съедает темнота за устьем (раньше она доезжала до торца и мгновенно
+ * возникала снова у камеры).
+ */
+function ShuttleCart({ active, park, deep }: { active: boolean; park: number; deep: number }) {
   const g = useRef<THREE.Group>(null);
-  const x = useRef(-4 + offset);
+  const full = useRef<THREE.Group>(null);
+  const empty = useRef<THREE.Group>(null);
+  const t = useRef(0);
+  // ход в один конец: скорость челнока одна и та же на всех уровнях
+  const run = CART_OUT * Math.max(1, (park - deep) / CART_RUN);
+  const cycle = CART_LOAD + run * 2 + CART_DARK;
+
   useFrame((_, dt) => {
-    if (!g.current) return;
-    if (active) {
-      x.current += dt * 0.75;
-      if (x.current > 7) x.current = -5.5;
+    if (active) t.current = (t.current + dt) % cycle;
+    const time = t.current;
+    let z = park;
+    let loaded = true;
+    if (time < CART_LOAD) {
+      // приехала пустой и понемногу наполняется рудой
+      loaded = time > CART_LOAD * 0.45;
+    } else if (time < CART_LOAD + run) {
+      z = park + (deep - park) * ease((time - CART_LOAD) / run);
+    } else if (time < CART_LOAD + run + CART_DARK) {
+      z = deep;
+      loaded = false;
+    } else {
+      z = deep + (park - deep) * ease((time - CART_LOAD - run - CART_DARK) / run);
+      loaded = false;
     }
-    g.current.position.x = x.current;
+    if (g.current) g.current.position.z = z;
+    if (full.current) full.current.visible = loaded;
+    if (empty.current) empty.current.visible = !loaded;
   });
+
   return (
-    <group ref={g} position={[-4 + offset, 0.62, RAIL_Z]} scale={1.5} rotation={[0, Math.PI / 2, 0]}>
-      <Cart ore={ore} />
+    <group ref={g} position={[RAIL_X, 0.62, park]} scale={1.5}>
+      <group ref={full}>
+        <Cart ore />
+      </group>
+      <group ref={empty} visible={false}>
+        <Cart />
+      </group>
+    </group>
+  );
+}
+
+/** Устье тоннеля в торце: чёрный проём в раме, туда уходят рельсы. */
+function TunnelMouth({ back }: { back: number }) {
+  return (
+    <group position={[RAIL_X, 0, back + 0.05]}>
+      <mesh position={[0, 1, 0]}>
+        <planeGeometry args={[1, 2]} />
+        <meshBasicMaterial color="#05070c" />
+      </mesh>
+      <Timber position={[-0.5, 1.05, 0.12]} args={[0.16, 2.1, 0.2]} />
+      <Timber position={[0.5, 1.05, 0.12]} args={[0.16, 2.1, 0.2]} />
+      <Timber position={[0, 2.15, 0.12]} args={[1.34, 0.18, 0.22]} />
     </group>
   );
 }
 
 /* ───────────────────────── постройки по стадиям ───────────────────────── */
 
-/** Деревянная крепь: рама-портал поперёк штрека. */
-function TimberSet({ x, w = 2.6, h = 2.9 }: { x: number; w?: number; h?: number }) {
+/** Деревянная крепь: рама-портал поперёк штрека. Брус толстеет вместе с пролётом. */
+function TimberSet({ z, w = 3.1, h = 3 }: { z: number; w?: number; h?: number }) {
+  const t = 0.22 * (w / 3.1);
   return (
-    <group position={[x, 0, RAIL_Z]}>
-      <Timber position={[0, h / 2, -w / 2]} args={[0.22, h, 0.22]} />
-      <Timber position={[0, h / 2, w / 2]} args={[0.22, h, 0.22]} />
-      <Timber position={[0, h, 0]} args={[0.24, 0.24, w + 0.3]} />
-      <Timber position={[0, h - 0.45, -w / 2 + 0.35]} args={[0.14, 0.14, 0.6]} rot={[0.7, 0, 0]} />
-      <Timber position={[0, h - 0.45, w / 2 - 0.35]} args={[0.14, 0.14, 0.6]} rot={[-0.7, 0, 0]} />
+    <group position={[0, 0, z]}>
+      <Timber position={[-w / 2, h / 2, 0]} args={[t, h, t]} />
+      <Timber position={[w / 2, h / 2, 0]} args={[t, h, t]} />
+      <Timber position={[0, h, 0]} args={[w + 0.3, t * 1.09, t * 1.09]} />
+      <Timber position={[-w / 2 + 0.35, h - 0.45, 0]} args={[0.6, 0.14, 0.14]} rot={[0, 0, -0.7]} />
+      <Timber position={[w / 2 - 0.35, h - 0.45, 0]} args={[0.6, 0.14, 0.14]} rot={[0, 0, 0.7]} />
     </group>
   );
 }
@@ -417,11 +591,11 @@ function Workbench({ position, rot = 0, crystals = 3 }: { position: [number, num
   return (
     <group position={position} rotation={[0, rot, 0]}>
       <mesh castShadow receiveShadow position={[0, 0.72, 0]}>
-        <boxGeometry args={[1.7, 0.1, 0.8]} />
+        <boxGeometry args={[1.5, 0.1, 0.7]} />
         <meshStandardMaterial color="#8a5a33" roughness={0.9} />
       </mesh>
-      {[-0.72, 0.72].map((x) =>
-        [-0.3, 0.3].map((z) => (
+      {[-0.62, 0.62].map((x) =>
+        [-0.25, 0.25].map((z) => (
           <mesh key={`${x}:${z}`} castShadow position={[x, 0.36, z]}>
             <boxGeometry args={[0.12, 0.72, 0.12]} />
             <meshStandardMaterial color="#6f4522" roughness={0.9} />
@@ -429,10 +603,9 @@ function Workbench({ position, rot = 0, crystals = 3 }: { position: [number, num
         )),
       )}
       {Array.from({ length: crystals }, (_, i) => (
-        <Crystal key={i} position={[-0.5 + i * 0.45, 0.88, (rnd(i) - 0.5) * 0.3]} h={0.28} r={0.09} rot={[0, 0, (rnd(i + 3) - 0.5) * 0.5]} />
+        <Crystal key={i} position={[-0.42 + i * 0.4, 0.88, (rnd(i) - 0.5) * 0.3]} h={0.28} r={0.09} rot={[0, 0, (rnd(i + 3) - 0.5) * 0.5]} />
       ))}
-      {/* молоток на столе */}
-      <mesh position={[0.62, 0.8, 0.16]} rotation={[0, 0.4, Math.PI / 2]}>
+      <mesh position={[0.55, 0.8, 0.14]} rotation={[0, 0.4, Math.PI / 2]}>
         <cylinderGeometry args={[0.022, 0.022, 0.34, 6]} />
         <meshStandardMaterial color="#8a5a33" roughness={0.9} />
       </mesh>
@@ -440,8 +613,8 @@ function Workbench({ position, rot = 0, crystals = 3 }: { position: [number, num
   );
 }
 
-/** Наклонный конвейер: лента и ящики с рудой ползут вниз к вагонетке. */
-function Conveyor({ active }: { active: boolean }) {
+/** Наклонный конвейер поперёк штрека: ящики с рудой ползут к рельсам. */
+function Conveyor({ active, x, z }: { active: boolean; x: number; z: number }) {
   const boxes = useRef<THREE.Group>(null);
   const t = useRef(0);
   useFrame((_, dt) => {
@@ -453,26 +626,36 @@ function Conveyor({ active }: { active: boolean }) {
     });
   });
   return (
-    <group position={[1.9, 0, -2.9]} rotation={[0, 0.45, 0]} scale={0.9}>
-      {/* станина */}
+    // сдвинут левее рельсов: по ним ходит вагонетка-челнок
+    <group position={[x, 0, z]} scale={0.6}>
+      {/* Лента светлее породы: тёмный металл на тёмной стене читался чёрной
+          плахой, повисшей поперёк штрека. */}
       <mesh castShadow position={[0, 0.62, 0]} rotation={[0, 0, -0.2]}>
         <boxGeometry args={[3.3, 0.12, 0.72]} />
-        <meshStandardMaterial color="#4c4a4e" metalness={0.45} roughness={0.6} />
+        <meshStandardMaterial color="#7c828c" metalness={0.45} roughness={0.6} />
       </mesh>
+      {/* Ноги: по паре с каждой стороны и лежни на полу — иначе конвейер
+          выглядел парящим, стойки терялись за самой лентой. */}
+      {[-1.4, 1.4].map((x) =>
+        [-0.26, 0.26].map((zz) => (
+          <mesh key={`${x}:${zz}`} castShadow position={[x, 0.4 - x * 0.09, zz]}>
+            <boxGeometry args={[0.12, 0.85, 0.12]} />
+            <meshStandardMaterial color="#6f4522" roughness={0.9} />
+          </mesh>
+        )),
+      )}
       {[-1.4, 1.4].map((x) => (
-        <mesh key={x} castShadow position={[x, 0.4 - x * 0.09, 0]}>
-          <boxGeometry args={[0.12, 0.85, 0.12]} />
-          <meshStandardMaterial color="#6f4522" roughness={0.9} />
+        <mesh key={x} receiveShadow position={[x, 0.05, 0]}>
+          <boxGeometry args={[0.42, 0.1, 0.78]} />
+          <meshStandardMaterial color="#5b3a1d" roughness={0.95} />
         </mesh>
       ))}
-      {/* ролики */}
       {[-1.5, -0.5, 0.5, 1.5].map((x) => (
         <mesh key={x} position={[x, 0.72 - x * 0.2, 0]} rotation={[Math.PI / 2, 0, 0]}>
           <cylinderGeometry args={[0.1, 0.1, 0.78, 10]} />
           <meshStandardMaterial color="#7b7f88" metalness={0.6} roughness={0.4} />
         </mesh>
       ))}
-      {/* ящики с рудой */}
       <group ref={boxes}>
         {[0, 1, 2, 3].map((i) => (
           <group key={i}>
@@ -491,13 +674,13 @@ function Conveyor({ active }: { active: boolean }) {
   );
 }
 
-/** Подъёмник: балка, канат и корзина, которая ходит вверх-вниз. */
-function Hoist({ active }: { active: boolean }) {
+/** Лебёдка у левой стены: балка, канат и корзина, которая ходит вверх-вниз. */
+function Hoist({ active, x, z }: { active: boolean; x: number; z: number }) {
   const basket = useRef<THREE.Group>(null);
   const rope = useRef<THREE.Mesh>(null);
   const wheel = useRef<THREE.Mesh>(null);
   useFrame((s, dt) => {
-    const y = 1.15 + Math.sin(s.clock.elapsedTime * (active ? 0.55 : 0.16)) * 0.75;
+    const y = 1.05 + Math.sin(s.clock.elapsedTime * (active ? 0.55 : 0.16)) * 0.65;
     if (basket.current) basket.current.position.y = y;
     if (rope.current) {
       const len = Math.max(0.1, 3.35 - y);
@@ -507,7 +690,7 @@ function Hoist({ active }: { active: boolean }) {
     if (wheel.current && active) wheel.current.rotation.z += dt * 0.9;
   });
   return (
-    <group position={[2.4, 0, -2.6]} scale={0.85}>
+    <group position={[x, 0, z]} scale={0.6} rotation={[0, Math.PI / 2, 0]}>
       <Timber position={[-0.75, 1.8, 0]} args={[0.2, 3.6, 0.2]} />
       <Timber position={[0.75, 1.8, 0]} args={[0.2, 3.6, 0.2]} />
       <Timber position={[0, 3.6, 0]} args={[1.9, 0.2, 0.2]} />
@@ -520,7 +703,7 @@ function Hoist({ active }: { active: boolean }) {
         <cylinderGeometry args={[0.02, 0.02, 1, 6]} />
         <meshStandardMaterial color="#c8b48a" roughness={0.9} />
       </mesh>
-      <group ref={basket} position={[0, 1.2, 0]}>
+      <group ref={basket} position={[0, 1.05, 0]}>
         <mesh castShadow>
           <boxGeometry args={[0.7, 0.42, 0.7]} />
           <meshStandardMaterial color="#8a5a33" roughness={0.9} />
@@ -536,38 +719,46 @@ function Hoist({ active }: { active: boolean }) {
   );
 }
 
-/** Второй ярус: каменный уступ слева с лестницей и кристаллами. */
-function UpperLedge({ stage }: { stage: number }) {
+/** Второй ярус: балкон, врезанный в левую стену, с лестницей и кристаллами. */
+function UpperLedge({ level, x, z }: { level: number; x: number; z: number }) {
   return (
-    <group position={[-2.9, 0, -1.8]} scale={0.9}>
-      <mesh castShadow receiveShadow position={[0, 0.85, 0]}>
-        <boxGeometry args={[2.6, 1.7, 2.6]} />
-        <meshStandardMaterial color="#4a5361" roughness={1} flatShading />
-      </mesh>
-      <mesh receiveShadow position={[0, 1.72, 0]}>
-        <boxGeometry args={[2.7, 0.12, 2.7]} />
+    <group position={[x, 0, z]}>
+      {/* площадка на кронштейнах */}
+      <mesh castShadow receiveShadow position={[0, 2.05, 0]}>
+        <boxGeometry args={[1.1, 0.16, 2.1]} />
         <meshStandardMaterial color="#59626f" roughness={1} />
       </mesh>
-      {/* лестница на уступ */}
-      {[0, 1, 2, 3].map((i) => (
-        <mesh key={i} castShadow position={[1.5 + i * 0.34, 1.5 - i * 0.42, 0.6]}>
-          <boxGeometry args={[0.42, 0.12, 0.9]} />
+      <mesh receiveShadow position={[-0.3, 1.35, 0]}>
+        <boxGeometry args={[0.9, 1.4, 2.1]} />
+        <meshStandardMaterial color="#4a5361" roughness={1} flatShading />
+      </mesh>
+      {[-0.85, 0.85].map((zz) => (
+        <Timber key={zz} position={[0.35, 1.75, zz]} args={[0.14, 0.14, 0.5]} rot={[0.9, 0, 0]} />
+      ))}
+      {/* лестница вниз, к полу штрека */}
+      {[0, 1, 2, 3, 4].map((i) => (
+        <mesh key={i} castShadow position={[0.42, 0.32 + i * 0.42, 1.35 + i * 0.16]}>
+          <boxGeometry args={[0.5, 0.08, 0.24]} />
           <meshStandardMaterial color="#8a5a33" roughness={0.9} />
         </mesh>
       ))}
-      <CrystalSpike position={[-0.4, 1.78, -0.3]} s={1.5} gold={stage >= 8} />
-      <CrystalSpike position={[0.6, 1.78, 0.4]} s={1.1} />
+      <CrystalSpike position={[-0.15, 2.13, -0.5]} s={1.2} gold={level >= MAX_LEVEL} />
+      <CrystalSpike position={[0.1, 2.13, 0.45]} s={0.9} />
       {/* перила */}
-      {[-1.1, 1.1].map((x) => (
-        <Timber key={x} position={[x, 2.1, 1.25]} args={[0.1, 0.7, 0.1]} />
+      {[-0.9, 0.9].map((zz) => (
+        <Timber key={zz} position={[0.5, 2.45, zz]} args={[0.09, 0.62, 0.09]} />
       ))}
-      <Timber position={[0, 2.4, 1.25]} args={[2.4, 0.1, 0.1]} />
+      <Timber position={[0.5, 2.72, 0]} args={[0.09, 0.09, 1.9]} />
     </group>
   );
 }
 
-/** Трубы, вентили и приборы вдоль задней стены (механизация). */
-function Pipes({ active }: { active: boolean }) {
+/**
+ * Трубы, вентили и приборы по торцу штрека (механизация). Висят невысоко:
+ * дальний торец видно только в узкую щель из-под кромки свода, и всё, что выше
+ * пары метров, там просто не попадает в кадр.
+ */
+function Pipes({ active, back, halfW }: { active: boolean; back: number; halfW: number }) {
   const valve = useRef<THREE.Mesh>(null);
   const needle = useRef<THREE.Mesh>(null);
   useFrame((s, dt) => {
@@ -575,46 +766,46 @@ function Pipes({ active }: { active: boolean }) {
     if (needle.current) needle.current.rotation.z = Math.sin(s.clock.elapsedTime * (active ? 2.4 : 0.5)) * 0.7;
   });
   return (
-    <group position={[0, 0, -3.55]}>
-      {/* горизонтальная магистраль */}
-      <mesh castShadow position={[0.6, 2.85, 0]} rotation={[0, 0, Math.PI / 2]}>
-        <cylinderGeometry args={[0.13, 0.13, 6.4, 12]} />
+    <group position={[0, 0, back + 0.32]}>
+      {/* горизонтальная магистраль вдоль торца */}
+      <mesh position={[0, 2.15, 0]} rotation={[0, 0, Math.PI / 2]}>
+        <cylinderGeometry args={[0.11, 0.11, halfW * 1.7, 12]} />
         <meshStandardMaterial color="#8b8f97" metalness={0.65} roughness={0.35} />
       </mesh>
-      {[-1.6, 0.8, 3].map((x) => (
-        <mesh key={x} position={[x, 2.85, 0]} rotation={[0, 0, Math.PI / 2]}>
-          <cylinderGeometry args={[0.17, 0.17, 0.16, 12]} />
+      {[-0.57, 0.14, 0.71].map((k) => (
+        <mesh key={k} position={[k * halfW, 2.15, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.15, 0.15, 0.16, 12]} />
           <meshStandardMaterial color="#6f737a" metalness={0.6} roughness={0.4} />
         </mesh>
       ))}
-      {/* спуск к печи */}
-      <mesh castShadow position={[3.2, 1.9, 0]}>
-        <cylinderGeometry args={[0.12, 0.12, 2, 12]} />
+      {/* спуск вдоль торца */}
+      <mesh position={[-halfW + 0.35, 1.35, 0]}>
+        <cylinderGeometry args={[0.1, 0.1, 1.6, 12]} />
         <meshStandardMaterial color="#8b8f97" metalness={0.65} roughness={0.35} />
       </mesh>
       {/* вентиль */}
-      <group position={[-1.6, 2.4, 0.2]}>
-        <mesh position={[0, 0.18, 0]}>
-          <cylinderGeometry args={[0.05, 0.05, 0.36, 8]} />
+      <group position={[-halfW + 0.75, 1.75, 0.22]}>
+        <mesh position={[0, 0.16, 0]}>
+          <cylinderGeometry args={[0.045, 0.045, 0.32, 8]} />
           <meshStandardMaterial color="#6f737a" metalness={0.6} roughness={0.4} />
         </mesh>
-        <mesh ref={valve} position={[0, 0.02, 0]}>
-          <torusGeometry args={[0.18, 0.035, 8, 18]} />
+        <mesh ref={valve}>
+          <torusGeometry args={[0.16, 0.032, 8, 18]} />
           <meshStandardMaterial color="#c0603c" metalness={0.4} roughness={0.5} />
         </mesh>
       </group>
       {/* прибор со стрелкой */}
-      <group position={[1.5, 2.35, 0.25]}>
-        <mesh>
-          <cylinderGeometry args={[0.24, 0.24, 0.1, 16]} />
+      <group position={[halfW - 1.05, 1.65, 0.24]}>
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.22, 0.22, 0.1, 16]} />
           <meshStandardMaterial color="#c9a24a" metalness={0.6} roughness={0.35} />
         </mesh>
-        <mesh position={[0, 0.06, 0]} rotation={[Math.PI / 2, 0, 0]}>
-          <circleGeometry args={[0.19, 16]} />
-          <meshStandardMaterial color="#f2ead4" emissive="#a08a4a" emissiveIntensity={0.3} roughness={0.6} />
+        <mesh position={[0, 0, 0.06]}>
+          <circleGeometry args={[0.17, 16]} />
+          <meshStandardMaterial color="#f2ead4" emissive="#a08a4a" emissiveIntensity={0.35} roughness={0.6} />
         </mesh>
-        <mesh ref={needle} position={[0, 0.08, 0]} rotation={[Math.PI / 2, 0, 0]}>
-          <boxGeometry args={[0.02, 0.15, 0.01]} />
+        <mesh ref={needle} position={[0, 0, 0.08]}>
+          <boxGeometry args={[0.02, 0.14, 0.01]} />
           <meshStandardMaterial color="#b23c2c" />
         </mesh>
       </group>
@@ -622,8 +813,8 @@ function Pipes({ active }: { active: boolean }) {
   );
 }
 
-/** Плавильня: печь с огненным кристаллом, жёлоб расплава и мостки. */
-function Furnace({ active }: { active: boolean }) {
+/** Плавильня: печь с огненным кристаллом и жёлобом расплава. */
+function Furnace({ active, x, z }: { active: boolean; x: number; z: number }) {
   const fire = useRef<THREE.Mesh>(null);
   const glow = useRef<THREE.MeshStandardMaterial>(null);
   useFrame((s) => {
@@ -632,8 +823,9 @@ function Furnace({ active }: { active: boolean }) {
     if (glow.current) glow.current.emissiveIntensity = (active ? 2.4 : 1.4) + Math.sin(t * 4) * 0.4;
   });
   return (
-    <group position={[1.9, 0, 0.7]} scale={0.85}>
-      {/* каменное основание */}
+    <group position={[x, 0, z]} scale={0.5}>
+      {/* зарево печи: distance у света в мировых единицах, масштаб группы его не трогает */}
+      <pointLight position={[0, 3.1, 0]} color="#ff8a3c" intensity={active ? 2.6 : 1.7} distance={11} decay={2} />
       <mesh castShadow receiveShadow position={[0, 0.35, 0]}>
         <cylinderGeometry args={[1.15, 1.3, 0.7, 8]} />
         <meshStandardMaterial color="#4c4a4e" roughness={1} flatShading />
@@ -642,7 +834,6 @@ function Furnace({ active }: { active: boolean }) {
         <cylinderGeometry args={[0.95, 1.1, 0.24, 8]} />
         <meshStandardMaterial color="#5b5a5e" roughness={1} flatShading />
       </mesh>
-      {/* огненный кристалл */}
       <mesh ref={fire} castShadow position={[0, 1.55, 0]}>
         <coneGeometry args={[0.42, 1.5, 6]} />
         <meshStandardMaterial ref={glow} color="#ffb254" emissive="#ff6a12" emissiveIntensity={2} roughness={0.35} flatShading />
@@ -651,44 +842,38 @@ function Furnace({ active }: { active: boolean }) {
         <coneGeometry args={[0.16, 0.62, 6]} />
         <meshStandardMaterial color="#ffcf7c" emissive="#ff7a1a" emissiveIntensity={1.8} roughness={0.35} flatShading />
       </mesh>
-      {/* жёлоб расплава */}
-      <mesh position={[-1.4, 0.09, 0.7]} rotation={[0, 0.5, 0]}>
+      {/* жёлоб расплава — вдоль штрека, к рельсам */}
+      <mesh position={[1.1, 0.09, 0.9]} rotation={[0, -0.6, 0]}>
         <boxGeometry args={[1.9, 0.1, 0.36]} />
         <meshStandardMaterial color="#ff8a3c" emissive="#ff5a05" emissiveIntensity={1.5} roughness={0.5} />
       </mesh>
-      {/* мостки */}
-      <group position={[-0.2, 0, 1.5]}>
-        {[0, 1, 2, 3].map((i) => (
-          <mesh key={i} castShadow position={[-0.9 + i * 0.6, 0.72, 0]}>
-            <boxGeometry args={[0.52, 0.09, 1.1]} />
-            <meshStandardMaterial color="#8a5a33" roughness={0.9} />
-          </mesh>
-        ))}
-        {[-1.1, 1.1].map((x) => (
-          <Timber key={x} position={[x, 0.36, 0]} args={[0.12, 0.72, 0.12]} />
-        ))}
-      </group>
     </group>
   );
 }
 
-/** Артель: напарники за столами (стадия 9+). */
-function Artel({ active }: { active: boolean }) {
+/**
+ * Артель: напарники за работой (последний уровень). Один разбирает руду у
+ * верстака, второй рубит правую стену. Оба стоят вне рельсов — по ним ходит
+ * челнок, и стоящий на путях напарник оказывался бы внутри вагонетки.
+ */
+function Artel({ active, halfW }: { active: boolean; halfW: number }) {
   return (
     <group>
-      <Workbench position={[-1.9, 0, 1.4]} rot={0.6} crystals={3} />
-      <group position={[-1.7, 0, 2.3]} rotation={[0, 0.2, 0]}>
-        <Character3D mode="mine" tool="none" working={active} scale={0.9} faceYaw={0.5} tossYaw={0.9} />
+      <group position={[-halfW + 2.15, 0, -5.5]} rotation={[0, -1.2, 0]}>
+        <Character3D mode="mine" tool="none" working={active} scale={0.9} faceYaw={0.7} tossYaw={1.1} />
       </group>
-      <group position={[2.3, 0, -1.9]} rotation={[0, -1.9, 0]}>
-        <Character3D mode="mine" tool="pick" working={active} scale={0.88} faceYaw={-0.6} tossYaw={-1.1} />
+      <group position={[halfW - 0.85, 0, -4.6]} rotation={[0, 1.9, 0]}>
+        <Character3D mode="mine" tool="pick" working={active} scale={0.88} faceYaw={2} tossYaw={2.4} />
       </group>
     </group>
   );
 }
 
-/** Сердце горы: гигантский кристалл на постаменте + полярное сияние. */
-function Heart() {
+/**
+ * Сердце горы: гигантский кристалл на постаменте + полярное сияние.
+ * Стоит в левой половине торца — правую занимают рельсы и устье тоннеля.
+ */
+function Heart({ x, z, s: size }: { x: number; z: number; s: number }) {
   const shards = useRef<THREE.Group>(null);
   const core = useRef<THREE.MeshStandardMaterial>(null);
   useFrame((s, dt) => {
@@ -696,8 +881,9 @@ function Heart() {
     if (core.current) core.current.emissiveIntensity = 1.6 + Math.sin(s.clock.elapsedTime * 1.6) * 0.5;
   });
   return (
-    <group position={[0.9, 0, -3.3]} scale={0.9}>
-      {/* постамент со светящимся кольцом */}
+    <group position={[x, 0, z]} scale={size}>
+      {/* сияние: distance в мировых единицах, поэтому масштаб группы делим только в позиции */}
+      <pointLight position={[0, 2.6 / size, 0]} color="#9fd8ff" intensity={2.8} distance={14} decay={2} />
       <mesh castShadow receiveShadow position={[0, 0.2, 0]}>
         <cylinderGeometry args={[1.6, 1.8, 0.4, 12]} />
         <meshStandardMaterial color="#413b55" roughness={1} flatShading />
@@ -706,7 +892,6 @@ function Heart() {
         <ringGeometry args={[1.1, 1.4, 32]} />
         <meshStandardMaterial color="#7ff0ff" emissive="#39c9e8" emissiveIntensity={1.6} side={THREE.DoubleSide} />
       </mesh>
-      {/* сам кристалл */}
       <mesh castShadow position={[0, 2.1, 0]}>
         <coneGeometry args={[0.95, 3.4, 6]} />
         <meshStandardMaterial
@@ -727,30 +912,29 @@ function Heart() {
         <coneGeometry args={[0.34, 1.4, 6]} />
         <meshStandardMaterial color="#d7f3ff" emissive="#39c9e8" emissiveIntensity={1.4} roughness={0.15} flatShading />
       </mesh>
-      {/* парящие осколки */}
       <group ref={shards} position={[0, 2.2, 0]}>
         {Array.from({ length: 7 }, (_, i) => {
           const a = (i / 7) * Math.PI * 2;
           return (
-            <mesh key={i} position={[Math.cos(a) * 2.1, Math.sin(i * 1.7) * 0.7, Math.sin(a) * 2.1]} rotation={[a, a * 2, 0]} scale={0.28}>
+            <mesh key={i} position={[Math.cos(a) * 1.9, Math.sin(i * 1.7) * 0.7, Math.sin(a) * 1.9]} rotation={[a, a * 2, 0]} scale={0.28}>
               <octahedronGeometry args={[1, 0]} />
               <meshStandardMaterial color="#bfe9ff" emissive="#57c6ff" emissiveIntensity={1.2} flatShading />
             </mesh>
           );
         })}
       </group>
-      {/* полярное сияние на задней стене */}
-      <mesh position={[0, 3.2, -1.3]}>
-        <planeGeometry args={[10, 5]} />
-        <meshBasicMaterial color="#2a6ea8" transparent opacity={0.4} />
+      {/* полярное сияние на торце */}
+      <mesh position={[0, 3, -1.2]}>
+        <planeGeometry args={[6.5, 5]} />
+        <meshBasicMaterial color="#2a6ea8" transparent opacity={0.38} />
       </mesh>
-      <mesh position={[-1.4, 3.6, -1.25]} rotation={[0, 0, 0.3]}>
-        <planeGeometry args={[2.2, 4.4]} />
-        <meshBasicMaterial color="#63e0c8" transparent opacity={0.26} />
+      <mesh position={[-1.4, 3.4, -1.15]} rotation={[0, 0, 0.3]}>
+        <planeGeometry args={[1.9, 4.2]} />
+        <meshBasicMaterial color="#63e0c8" transparent opacity={0.24} />
       </mesh>
-      <mesh position={[1.8, 3.4, -1.25]} rotation={[0, 0, -0.25]}>
-        <planeGeometry args={[1.8, 4]} />
-        <meshBasicMaterial color="#9b7dff" transparent opacity={0.24} />
+      <mesh position={[1.6, 3.2, -1.15]} rotation={[0, 0, -0.25]}>
+        <planeGeometry args={[1.6, 3.8]} />
+        <meshBasicMaterial color="#9b7dff" transparent opacity={0.22} />
       </mesh>
     </group>
   );
@@ -766,7 +950,6 @@ function Chips({ apiRef }: { apiRef: React.MutableRefObject<{ hit: () => void; t
   const flash = useRef<THREE.PointLight>(null);
   const ore = useRef<THREE.Mesh>(null);
   const state = useRef({
-    // осколки: позиция, скорость, остаток жизни
     chips: Array.from({ length: CHIP_COUNT }, () => ({ p: new THREE.Vector3(), v: new THREE.Vector3(), life: 0 })),
     next: 0,
     flash: 0,
@@ -783,8 +966,9 @@ function Chips({ apiRef }: { apiRef: React.MutableRefObject<{ hit: () => void; t
           s.next++;
           const a = rnd(s.next * 3) * Math.PI * 2;
           const up = 1.4 + rnd(s.next * 7) * 2.2;
-          c.p.set(VEIN[0] + (rnd(s.next) - 0.5) * 0.3, VEIN[1] + (rnd(s.next + 1) - 0.5) * 0.3, VEIN[2] + 0.45);
-          c.v.set(Math.cos(a) * 1.6, up, 0.8 + rnd(s.next + 2) * 1.6);
+          c.p.set(VEIN[0] + 0.35, VEIN[1] + (rnd(s.next + 1) - 0.5) * 0.4, VEIN[2] + (rnd(s.next) - 0.5) * 0.4);
+          // осколки летят от стены в штрек: вправо и на зрителя
+          c.v.set(0.9 + rnd(s.next + 2) * 1.4, up, Math.cos(a) * 1.5);
           c.life = 0.75 + rnd(s.next + 5) * 0.35;
         }
       },
@@ -800,7 +984,6 @@ function Chips({ apiRef }: { apiRef: React.MutableRefObject<{ hit: () => void; t
 
   useFrame((_, dt) => {
     const s = state.current;
-    // осколки летят и гаснут
     if (group.current) {
       group.current.children.forEach((m, i) => {
         const c = s.chips[i];
@@ -823,12 +1006,10 @@ function Chips({ apiRef }: { apiRef: React.MutableRefObject<{ hit: () => void; t
         m.scale.setScalar(0.07 * k);
       });
     }
-    // вспышка удара
     if (flash.current) {
       s.flash = Math.max(0, s.flash - dt);
       flash.current.intensity = s.flash * 22;
     }
-    // кусок руды летит в вагонетку
     if (ore.current) {
       if (s.toss >= 0) {
         s.toss += dt / 0.62;
@@ -840,7 +1021,7 @@ function Chips({ apiRef }: { apiRef: React.MutableRefObject<{ hit: () => void; t
           ore.current.visible = true;
           ore.current.position.set(
             THREE.MathUtils.lerp(HAND[0], CART_SPOT[0], u),
-            THREE.MathUtils.lerp(HAND[1], CART_SPOT[1], u) + Math.sin(u * Math.PI) * 1.15,
+            THREE.MathUtils.lerp(HAND[1], CART_SPOT[1], u) + Math.sin(u * Math.PI) * 1.1,
             THREE.MathUtils.lerp(HAND[2], CART_SPOT[2], u),
           );
           ore.current.rotation.x += dt * 7;
@@ -862,7 +1043,7 @@ function Chips({ apiRef }: { apiRef: React.MutableRefObject<{ hit: () => void; t
           </mesh>
         ))}
       </group>
-      <pointLight ref={flash} position={[VEIN[0], VEIN[1], VEIN[2] + 0.6]} color="#ffe6a8" intensity={0} distance={4} decay={2} />
+      <pointLight ref={flash} position={[VEIN[0] + 0.4, VEIN[1], VEIN[2]]} color="#ffe6a8" intensity={0} distance={4} decay={2} />
       <mesh ref={ore} visible={false} scale={0.16} castShadow>
         <icosahedronGeometry args={[1, 0]} />
         <meshStandardMaterial color="#5a5346" roughness={1} flatShading />
@@ -874,17 +1055,20 @@ function Chips({ apiRef }: { apiRef: React.MutableRefObject<{ hit: () => void; t
 /* ───────────────────────── камера ───────────────────────── */
 
 /**
- * Фиксированная изо-камера. При входе «приземляется»: стартует чуть выше и
- * дальше и за ~0.9 с оседает в рабочий кадр — ощущение проваливания внутрь.
+ * Фиксированная камера штрека. При входе «приземляется»: стартует выше и дальше
+ * и за ~0.9 с оседает в рабочий кадр — ощущение проваливания внутрь. Рабочая
+ * дистанция зависит от уровня (camFor): зал растёт, и камера отходит, но
+ * медленнее — иначе кадр на всех уровнях выглядел бы одинаково.
  */
-function InteriorCamera() {
+function InteriorCamera({ level }: { level: number }) {
   const { camera } = useThree();
   const t = useRef(0);
+  const away = camFor(level);
   useFrame((_, dt) => {
     t.current = Math.min(1, t.current + dt / 0.9);
     const k = 1 - Math.pow(1 - t.current, 3); // easeOutCubic
-    const scale = THREE.MathUtils.lerp(1.32, 1, k);
-    const lift = THREE.MathUtils.lerp(3.4, 0, k);
+    const scale = THREE.MathUtils.lerp(1.3, 1, k) * away;
+    const lift = THREE.MathUtils.lerp(3.2, 0, k);
     camera.position.set(
       CAM_TARGET.x + CAM_OFFSET.x * scale,
       CAM_TARGET.y + CAM_OFFSET.y * scale + lift,
@@ -897,74 +1081,104 @@ function InteriorCamera() {
 
 /* ───────────────────────── сцена целиком ───────────────────────── */
 
-export function MineInterior({ stage, active }: { stage: number; active: boolean }) {
+export function MineInterior({ level, active }: { level: number; active: boolean }) {
   const fx = useRef<{ hit: () => void; toss: () => void } | null>(null);
-  const s = Math.min(10, Math.max(1, Math.round(stage)));
+  const s = Math.min(MAX_LEVEL, Math.max(0, Math.round(level)));
+  const halfW = halfWFor(s);
+  const back = backFor(s);
+  const railTo = back + 0.3;
+  const top = s >= MAX_LEVEL;
+  /**
+   * Реквизит у стен отмеряется ОТ стены, а не от оси штрека: зал с уровнями
+   * раздаётся вширь, и намертво прибитые координаты оставляли бы ящики и
+   * лебёдку висеть посреди прохода. Аргумент — зазор от внутренней грани стены.
+   */
+  const left = (gap: number) => -halfW + gap;
+  const right = (gap: number) => halfW - gap;
+  // Кристаллы по стенам: нижние стоят на полу, верхние «растут» из стены.
+  const spikes: [number, number, number][] = [
+    [right(0.15), 0, -3.4],
+    [left(0.13), 1.55, -2.5],
+    [right(0.15), 0, -5.9],
+    [right(0.13), 1.7, -4.3],
+  ];
 
   return (
     <>
-      <color attach="background" args={[s >= 10 ? '#0d1424' : s >= 8 ? '#160f0d' : '#0a0e14']} />
-      <fog attach="fog" args={[s >= 10 ? '#0d1424' : '#0a0e14', 16, 42]} />
+      <color attach="background" args={[top ? '#0d1424' : '#0a0e14']} />
+      <fog attach="fog" args={[top ? '#0d1424' : '#0a0e14', 13, 30]} />
 
-      <InteriorCamera />
-      <Lights stage={s} active={active} />
-      <CaveShell stage={s} />
-      <Vein stage={s} />
+      <InteriorCamera level={s} />
+      <Lights level={s} back={back} halfW={halfW} />
+      <CaveShell level={s} />
+      <Vein level={s} halfW={halfW} />
 
-      {/* фонари: чем крупнее шахта, тем больше света */}
-      <Lantern position={[-2.0, 2.4, -3.2]} intensity={1.2} />
-      {s >= 3 && <Lantern position={[1.5, 2.5, -3.2]} intensity={1} />}
-      {s >= 5 && <Lantern position={[-2.6, 2.3, -0.2]} intensity={0.9} />}
-      {s >= 7 && <Lantern position={[2.4, 2.5, 0.6]} intensity={0.9} />}
+      {/* Фонари на стенах: чем крупнее шахта, тем дальше вглубь они висят.
+          Зазор от стены больше полуметра — глыбы породы выпирают внутрь штрека
+          сантиметров на тридцать, и фонарь, повешенный впритык, тонул в скале. */}
+      <Lantern position={[right(0.75), 2.4, -2]} intensity={1.2} />
+      {s >= 2 && <Lantern position={[left(0.55), 2.4, -3.9]} intensity={1} />}
+      {s >= 4 && <Lantern position={[right(0.55), 2.5, -5.6]} intensity={0.95} />}
+      {s >= 5 && <Lantern position={[left(0.5), 2.5, back + 1.1]} intensity={0.9} />}
 
-      {/* 2 — рельсы и вагонетка */}
-      {s >= 2 && <Rails />}
-      {s >= 2 && <RollingCart active={active && s >= 3} ore={s >= 3} />}
-      {s >= 5 && <RollingCart active={active} offset={4.6} ore />}
+      {/* 1 — рельсы, устье тоннеля в торце и вагонетка-челнок */}
+      {s >= 1 && <Rails from={NEAR_Z} to={railTo} />}
+      {s >= 1 && <TunnelMouth back={back} />}
+      {s >= 1 && <ShuttleCart active={active} park={CART_SPOT[2]} deep={back - 0.6} />}
 
-      {/* 3 — крепь, верстак, кристаллы по залу */}
-      {s >= 3 && <TimberSet x={-2.3} w={2.2} h={2.7} />}
-      {s >= 3 && <Workbench position={[1.9, 0, 1.3]} rot={-0.5} crystals={Math.min(4, s - 1)} />}
-      {s >= 3 &&
-        [
-          [-2.6, 0, -3.3],
-          [2.3, 0, -3.4],
-          [-2.2, 0, 1.9],
-        ]
-          .slice(0, s >= 6 ? 3 : s >= 4 ? 2 : 1)
-          .map((p, i) => <CrystalSpike key={i} position={p as [number, number, number]} s={1.2 + i * 0.35} gold={s >= 8 && i === 0} />)}
+      {/* 0 — ящик с припасом: даже в норе кадр не должен быть пустым полом.
+          Координата по x прибита к оси штрека, а не отмерена от стены: у самой
+          камеры стена уже за краем кадра, и на верхних уровнях ящик уезжал за
+          левую кромку вместе с ней. */}
+      <Crate position={[-1.05, 0.275, -0.5]} s={0.55} rot={0.3} />
+      <Crate position={[-1.15, 0.72, -0.44]} s={0.34} rot={-0.5} />
 
-      {/* 4 — портал-крепь, конвейер, ящики и табличка */}
-      {s >= 4 && <TimberSet x={0.9} w={2.4} h={2.9} />}
-      {s >= 4 && s < 10 && <Conveyor active={active} />}
-      {s >= 4 && (
+      {/* 2 — крепь ритмом вглубь, лебёдка, кристаллы вдоль стен. Пролёт рамы
+          тянется от стены до стены, поэтому ширина считается из halfW.
+          Дальние рамы ниже ближних: верхушку высокой рамы срезает свод, и от
+          неё в кадре остаются одни стойки — ритм штрека при этом пропадает. */}
+      {s >= 2 &&
+        timberZs(back).map((z, i) => <TimberSet key={z} z={z} w={halfW * 2 - 0.35} h={2.85 - i * 0.2} />)}
+      {/* лебёдка работает до 5-го уровня: там её место занимает балкон яруса.
+          Стоит ПЕРЕД первой рамой — на её месте стойка проходила бы насквозь */}
+      {s >= 2 && s <= 4 && <Hoist active={active} x={left(0.5)} z={-2.5} />}
+      {s >= 2 &&
+        spikes
+          .slice(0, s >= 5 ? 4 : s >= 4 ? 3 : s >= 3 ? 2 : 1)
+          .map((p, i) => <CrystalSpike key={i} position={p} s={1 + i * 0.25} gold={top && i === 0} />)}
+
+      {/* 3 — конвейер в пролёте между рамами, ящики и табличка */}
+      {s >= 3 && !top && <Conveyor active={active} x={left(1.4)} z={-4.2} />}
+      {s >= 3 && (
         <group>
-          <Crate position={[-2.5, 0.34, 1.5]} s={0.68} rot={0.3} />
-          <Crate position={[-2.2, 0.34, 2.3]} s={0.62} rot={-0.4} />
-          <Barrel position={[2.6, 0, 2.4]} rot={0.4} />
-          <group position={[2.7, 0, -1.4]} scale={1.4}>
-            <Sign position={[0, 0, 0]} rotation={-1.2} />
+          <Crate position={[left(0.43), 0.32, -2.15]} s={0.62} rot={-0.4} />
+          {/* бочка и табличка ушли к правой стене: слева вдоль всего штрека
+              тянется рудный выступ, и врытая в него табличка пропадала внутри
+              породы, а места ещё просят крепь, лебёдка и верстак */}
+          <Barrel position={[right(0.4), 0, -3]} rot={0.4} />
+          <group position={[right(0.4), 0, -1.05]} scale={1.3}>
+            <Sign position={[0, 0, 0]} rotation={-0.9} />
           </group>
         </group>
       )}
 
-      {/* 5 — подъёмник */}
-      {s >= 5 && s < 10 && <Hoist active={active} />}
+      {/* 4 — верстак у стены. Развёрнут лицом в штрек: вдоль стены он занимал
+          бы полтора метра глубины, и глубже него уже ничего не помещалось. */}
+      {s >= 4 && <Workbench position={[left(0.95), 0, -5.25]} rot={0.22} crystals={Math.min(4, s)} />}
 
-      {/* 6 — второй ярус с кристаллами */}
-      {s >= 6 && <UpperLedge stage={s} />}
+      {/* 5 — балкон второго яруса на месте лебёдки, трубы и приборы по торцу */}
+      {s >= 5 && <UpperLedge level={s} x={left(1)} z={-4} />}
+      {s >= 5 && <Pipes active={active} back={back} halfW={halfW} />}
 
-      {/* 7 — трубы и приборы */}
-      {s >= 7 && <Pipes active={active} />}
-
-      {/* 8 — плавильня */}
-      {s >= 8 && <Furnace active={active} />}
-
-      {/* 9 — артель: напарники за столами */}
-      {s >= 9 && <Artel active={active} />}
-
-      {/* 10 — сердце горы */}
-      {s >= 10 && <Heart />}
+      {/* 6 — плавильня, артель и сердце горы в глубине зала. Глубину подобрали
+          под свод: всё, что дальше и выше линии обзора из-под кромки среза,
+          просто не попадает в кадр. Плавильня прижата к левой стене (частью
+          утоплена в породу — читается как печь в нише), сердце горы сдвинуто
+          правее: постамент у него в два метра, и вдвоём у левой стены они
+          вставали друг в друга. */}
+      {top && <Furnace active={active} x={left(0.5)} z={-6.9} />}
+      {top && <Artel active={active} halfW={halfW} />}
+      {top && <Heart x={-0.7} z={back + 1.15} s={0.55} />}
 
       {/* герой: долбит жилу, вытирает лоб, кидает руду в вагонетку */}
       <group position={HERO} rotation={[0, HERO_YAW, 0]}>
@@ -972,8 +1186,9 @@ export function MineInterior({ stage, active }: { stage: number; active: boolean
           mode="mine"
           tool="pick"
           working={active}
-          faceYaw={-0.9}
-          tossYaw={-1.6}
+          scale={1.15}
+          faceYaw={FACE_YAW}
+          tossYaw={TOSS_YAW}
           onHit={() => fx.current?.hit()}
           onToss={() => fx.current?.toss()}
         />

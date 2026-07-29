@@ -58,56 +58,52 @@ export function getLevelProgress(totalSeconds: number): number {
   return Math.min(1, Math.max(0, (hours - current.minHours) / span));
 }
 
-/* ──────────── ВНУТРЕННОСТИ ШАХТЫ: своя шкала на 10 стадий ────────────
-   Снаружи зона живёт по ZONE_LEVELS (7 уровней, общие для всех тем), а
-   внутри шахты — отдельная, более дробная лестница по референсу «внутренняя
-   эволюция шахты: 10 уровней». Часы те же, просто ступеней больше. */
+/** Максимальный уровень зоны — одинаков снаружи и внутри. */
+export const MAX_LEVEL = ZONE_LEVELS[ZONE_LEVELS.length - 1].level;
+
+/* ──────────── ВНУТРЕННОСТИ ШАХТЫ: ТА ЖЕ лестница, что и снаружи ────────────
+   Раньше внутри шахты жила отдельная шкала на 10 стадий: снаружи «уровень 5 из
+   6», внутри «стадия 8 из 10» — одни и те же часы, разные цифры. Теперь ступени
+   ОДНИ: пороги и номера берутся из ZONE_LEVELS, у шахты только свои названия. */
 
 export interface MineStage {
-  /** Номер стадии, 1..10 (0 не бывает: даже с нуля часов есть нора) */
+  /** Номер уровня, 0..6 — ровно как снаружи */
   level: number;
   /** Минимум наработанных часов */
   minHours: number;
-  /** Название стадии для пользователя */
+  /** Название уровня для пользователя */
   title: string;
 }
 
-export const MINE_STAGES: MineStage[] = [
-  { level: 1, minHours: 0, title: 'Нора' },
-  { level: 2, minHours: 1, title: 'Штрек' },
-  { level: 3, minHours: 3, title: 'Первая жила' },
-  { level: 4, minHours: 7, title: 'Крепь' },
-  { level: 5, minHours: 15, title: 'Подъёмник' },
-  { level: 6, minHours: 30, title: 'Кристальный зал' },
-  { level: 7, minHours: 50, title: 'Механизация' },
-  { level: 8, minHours: 80, title: 'Плавильня' },
-  { level: 9, minHours: 120, title: 'Артель' },
-  { level: 10, minHours: 200, title: 'Сердце горы' },
+/** Названия уровней шахты (индекс = номер уровня, длина = длине ZONE_LEVELS). */
+const MINE_TITLES = [
+  'Нора',
+  'Штрек',
+  'Первая жила',
+  'Крепь',
+  'Подъёмник',
+  'Кристальный зал',
+  'Сердце горы',
 ];
 
-/** Текущая стадия внутренностей шахты по суммарным секундам категории. */
+export const MINE_STAGES: MineStage[] = ZONE_LEVELS.map((lvl, i) => ({
+  level: lvl.level,
+  minHours: lvl.minHours,
+  title: MINE_TITLES[i] ?? lvl.title,
+}));
+
+/** Текущий уровень внутренностей шахты по суммарным секундам категории. */
 export function getMineStage(totalSeconds: number): MineStage {
-  const hours = totalSeconds / 3600;
-  let current = MINE_STAGES[0];
-  for (const st of MINE_STAGES) {
-    if (hours >= st.minHours) current = st;
-  }
-  return current;
+  return MINE_STAGES[getZoneLevel(totalSeconds).level];
 }
 
-/** Следующая стадия шахты или null, если достигнуто «Сердце горы». */
+/** Следующий уровень шахты или null, если достигнуто «Сердце горы». */
 export function getNextMineStage(totalSeconds: number): MineStage | null {
-  const current = getMineStage(totalSeconds);
-  return MINE_STAGES.find((st) => st.level === current.level + 1) ?? null;
+  const next = getNextLevel(totalSeconds);
+  return next ? MINE_STAGES[next.level] : null;
 }
 
-/** Прогресс к следующей стадии шахты, 0..1. */
+/** Прогресс к следующему уровню шахты, 0..1 — та же шкала, что и снаружи. */
 export function getMineStageProgress(totalSeconds: number): number {
-  const current = getMineStage(totalSeconds);
-  const next = getNextMineStage(totalSeconds);
-  if (!next) return 1;
-  const hours = totalSeconds / 3600;
-  const span = next.minHours - current.minHours;
-  if (span <= 0) return 1;
-  return Math.min(1, Math.max(0, (hours - current.minHours) / span));
+  return getLevelProgress(totalSeconds);
 }

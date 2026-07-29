@@ -1,13 +1,14 @@
 /**
  * 3D-главная во весь экран: большой светлый мир, по которому можно ездить
  * (перетаскивание/зум/наклон, OrbitControls). Зоны-станции расставлены по миру
- * и соединены дорогами; шахта — 3D-модель. Тап по станции открывает панель
+ * и соединены дорогами; шахта — 3D-модель, растущая по уровням зоны
+ * (0..6, thresholds.ts). Тап по станции открывает панель
  * (StationSheet), а тап по шахте — проваливает внутрь неё: камера ныряет в
  * портал и сцена сменяется на интерьер (MineInterior) в том же Canvas.
  * Интерфейс приложения плавает стеклом поверх (см. Map.tsx).
  */
 
-import { Suspense, useEffect, useMemo, useRef } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Environment, Html, Lightformer, MapControls, SoftShadows } from '@react-three/drei';
 import * as THREE from 'three';
@@ -36,12 +37,12 @@ interface HomeSceneProps {
   totals: Map<string, number>;
   activeCategoryId: string | null;
   onOpen: (id: string) => void;
-  /** Демо: принудительный уровень шахты (null = по наработанным часам). */
-  mineLevelOverride?: number | null;
+  /** Демо: принудительный уровень зоны с 3D-моделью — шахты (null = по часам). */
+  levelOverride?: number | null;
   /** Режим сцены: карта / нырок / внутри шахты / подъём */
   view?: SceneView;
-  /** Стадия внутренностей шахты 1..10 (MINE_STAGES) */
-  mineStage?: number;
+  /** Уровень шахты 0..6 — тот же, что снаружи (MINE_STAGES = ZONE_LEVELS) */
+  mineLevel?: number;
   /** Идёт ли таймер шахты — внутри от этого зависит, работает ли герой */
   mineActive?: boolean;
 }
@@ -62,6 +63,7 @@ function Station({
   levelOverride?: number | null;
 }) {
   const isMine = cat.theme === 'mine';
+  // у зоны с 3D-моделью уровень можно принудить (демо-переключатель)
   const level = isMine && levelOverride != null ? levelOverride : getZoneLevel(seconds).level;
   const scale = isMine ? 0.72 : 0.9;
   return (
@@ -80,13 +82,23 @@ function Station({
           document.body.style.cursor = 'auto';
         }}
       >
-        {isMine ? <Mine3D level={level} active={active} /> : <StationSign color={categoryColor(cat.color)} />}
+        {isMine ? (
+          <Mine3D level={level} active={active} />
+        ) : (
+          <StationSign color={categoryColor(cat.color)} />
+        )}
         <mesh position={[0, 1, 0]} visible={false}>
           <cylinderGeometry args={[2, 2, 2.6, 12]} />
           <meshBasicMaterial />
         </mesh>
       </group>
-      <Html position={[0, isMine ? 2.4 : 2.1, 0]} center distanceFactor={13} zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
+      <Html
+        position={[0, isMine ? 2.4 : 2.1, 0]}
+        center
+        distanceFactor={13}
+        zIndexRange={[10, 0]}
+        style={{ pointerEvents: 'none' }}
+      >
         <div
           style={{
             whiteSpace: 'nowrap',
@@ -160,6 +172,48 @@ function DiveRig({
   return null;
 }
 
+/**
+ * Темп теней: карта теней перерисовывается не каждый кадр, а каждый третий.
+ * Мир статичный, а у живого (персонаж, вагонетки) тень обновляется ~20 раз в
+ * секунду — на глаз не отличить. Теневой проход занимал больше половины всей
+ * отрисовки кадра, так что это самая дешёвая экономия из возможных.
+ */
+/** Полное разрешение карты и пониженное — на время жеста. */
+const FULL_DPR = typeof window === 'undefined' ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+const DRAG_DPR = FULL_DPR * 0.6;
+
+/**
+ * Пока карту тащат или зумят, рисуем в 0.6 разрешения: в движении разницы не
+ * видно, а пикселей вчетверо меньше — а именно на них и уходит время (мягкие
+ * тени считаются на каждый пиксель). Через четверть секунды после остановки
+ * возвращаем полное качество, чтобы разглядывать мир было не на что жаловаться.
+ */
+function useDragQuality() {
+  const setDpr = useThree((s) => s.setDpr);
+  const restore = useRef(0);
+  useEffect(() => () => window.clearTimeout(restore.current), []);
+  const onStart = useCallback(() => {
+    window.clearTimeout(restore.current);
+    setDpr(DRAG_DPR);
+  }, [setDpr]);
+  const onEnd = useCallback(() => {
+    window.clearTimeout(restore.current);
+    restore.current = window.setTimeout(() => setDpr(FULL_DPR), 250);
+  }, [setDpr]);
+  return { onStart, onEnd };
+}
+
+function ShadowPacer({ every = 3 }: { every?: number }) {
+  const frame = useRef(0);
+  useFrame((state) => {
+    const shadows = state.gl.shadowMap;
+    if (shadows.autoUpdate) shadows.autoUpdate = false;
+    frame.current = (frame.current + 1) % every;
+    if (frame.current === 0) shadows.needsUpdate = true;
+  });
+  return null;
+}
+
 /** Возврат из шахты: ставит камеру карты туда, откуда ныряли. */
 function PoseKeeper({ poseRef }: { poseRef: React.MutableRefObject<SavedPose | null> }) {
   const camera = useThree((s) => s.camera);
@@ -184,7 +238,7 @@ function SceneContents({
   totals,
   activeCategoryId,
   onOpen,
-  mineLevelOverride,
+  levelOverride,
   view = 'map',
   poseRef,
 }: HomeSceneProps & { poseRef: React.MutableRefObject<SavedPose | null> }) {
@@ -195,6 +249,8 @@ function SceneContents({
     () => stationLayout(curve, placed.length, mineIndex),
     [curve, placed.length, mineIndex],
   );
+  // на время жеста роняем разрешение и возвращаем его в покое
+  const quality = useDragQuality();
   const activeIndex = placed.findIndex((c) => c.id === activeCategoryId);
   const restIndex = mineIndex >= 0 ? mineIndex : 0;
   const charSpot = placed.length ? posOf(activeIndex >= 0 ? activeIndex : restIndex) : ([0, 0] as [number, number]);
@@ -205,8 +261,10 @@ function SceneContents({
       <color attach="background" args={['#bfe6ff']} />
       <fog attach="fog" args={['#cdeeff', 30, 58]} />
 
-      {/* мягкие полутени (реалистичнее, чем жёсткие карты теней) */}
-      <SoftShadows size={14} samples={12} focus={0.7} />
+      {/* мягкие полутени (реалистичнее, чем жёсткие карты теней). samples —
+          сколько раз шейдер опрашивает карту теней на каждый пиксель: 6 хватает
+          для той же мягкости, а стоит вдвое дешевле двенадцати */}
+      <SoftShadows size={14} samples={6} focus={0.7} />
 
       <hemisphereLight args={['#dcefff', '#6b8a54', 0.55]} />
       <ambientLight intensity={0.35} />
@@ -215,8 +273,8 @@ function SceneContents({
         intensity={1.7}
         color="#fff1d0"
         castShadow
-        shadow-mapSize-width={2048}
-        shadow-mapSize-height={2048}
+        shadow-mapSize-width={1024}
+        shadow-mapSize-height={1024}
         shadow-bias={-0.0004}
         shadow-camera-near={0.5}
         shadow-camera-far={60}
@@ -250,7 +308,7 @@ function SceneContents({
           seconds={totals.get(cat.id) ?? 0}
           active={activeCategoryId === cat.id}
           onOpen={onOpen}
-          levelOverride={mineLevelOverride}
+          levelOverride={levelOverride}
         />
       ))}
 
@@ -265,7 +323,9 @@ function SceneContents({
         target={[mineSpot[0], 0.4, mineSpot[1]]}
         enabled={view === 'map'}
         enableDamping
-        dampingFactor={0.08}
+        dampingFactor={0.16}
+        onStart={quality.onStart}
+        onEnd={quality.onEnd}
         minDistance={2.5}
         maxDistance={30}
         minPolarAngle={0.3}
@@ -284,7 +344,7 @@ function SceneContents({
 }
 
 export function HomeScene(props: HomeSceneProps) {
-  const { view = 'map', mineStage = 1, mineActive = false } = props;
+  const { view = 'map', mineLevel = 0, mineActive = false } = props;
   // стартовая камера возле центральной точки пути (там ориентир-шахта):
   // приподнята и ближе — изо-ракурс как на референсах, шахта в нижней части
   // кадра (не за верхней стеклянной панелью), видно кольцо рельсов сверху
@@ -305,11 +365,13 @@ export function HomeScene(props: HomeSceneProps) {
       gl={{ antialias: true }}
       style={{ touchAction: 'none' }}
     >
+      {/* тени пересчитываются реже, чем кадры — общее для карты и шахты */}
+      <ShadowPacer />
       <Suspense fallback={null}>
         {showMap ? (
           <SceneContents {...props} poseRef={poseRef} />
         ) : (
-          <MineInterior stage={mineStage} active={mineActive} />
+          <MineInterior level={mineLevel} active={mineActive} />
         )}
       </Suspense>
     </Canvas>
