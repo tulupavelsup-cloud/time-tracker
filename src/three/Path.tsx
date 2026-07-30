@@ -5,26 +5,30 @@
  * плиток вдоль кривой). Экспортит кривую-путь и хелпер точек станций.
  */
 
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import * as THREE from 'three';
-import { Instance, Instances } from '@react-three/drei';
+import { chain, Layer, type Placed } from './Instanced';
 
 const GRASS_Y = 0;
 
-/** Опорные точки змейки (x,z). Слева-снизу направо-вверх, с петлями. */
+/**
+ * Опорные точки змейки (x,z). Дорога идёт В ГЛУБИНУ, а не в ширину: экран
+ * телефона высокий и узкий, поэтому по ширине в кадр влезает всего ~12 юнитов
+ * (сравни: в глубину — больше тридцати). Раньше путь был растянут на 28 юнитов
+ * поперёк экрана и в кадре оказывалась ровно одна станция — та, что в центре,
+ * то есть шахта: до остальных приходилось долго тащить карту. Держим |x| ≲ 4.
+ */
 // eslint-disable-next-line react-refresh/only-export-components
 export const PATH_POINTS: [number, number][] = [
-  [-14.5, 11],
-  [-10, 6.5],
-  [-12, 0.8],
-  [-6.5, -2],
-  [-8.5, -7.5],
-  [-2.5, -6.5],
-  [0, -1],
-  [4.5, -4.5],
-  [7.5, 0.8],
-  [12, 3],
-  [13.5, 9.5],
+  [-3.6, 8.4],
+  [1, 7],
+  [-1.6, 4],
+  [3.2, 2.2],
+  [0.4, -1],
+  [-3.4, -2.4],
+  [0.8, -5],
+  [4, -6.6],
+  [0.4, -8.6],
 ];
 
 /** Собрать гладкую кривую-путь по опорным точкам. */
@@ -36,6 +40,49 @@ export function buildPath(): THREE.CatmullRomCurve3 {
     'catmullrom',
     0.5,
   );
+}
+
+/** Точки вдоль дороги — по ним считаем, что близко к обочине, а что нет. */
+// eslint-disable-next-line react-refresh/only-export-components
+export function pathSamples(curve: THREE.CatmullRomCurve3, n = 140): THREE.Vector3[] {
+  return curve.getSpacedPoints(n);
+}
+
+/** Расстояние от точки (x,z) до дороги — чтобы не сажать декор на брусчатку. */
+// eslint-disable-next-line react-refresh/only-export-components
+export function distanceToPath(samples: THREE.Vector3[], x: number, z: number): number {
+  let best = Infinity;
+  for (const p of samples) {
+    const d = (p.x - x) ** 2 + (p.z - z) ** 2;
+    if (d < best) best = d;
+  }
+  return Math.sqrt(best);
+}
+
+/**
+ * Точка у обочины: t — доля пути, offset — сдвиг по нормали (минус/плюс = лево/
+ * право по ходу). Плюс угол, при котором «лицо» пропа (локальный +x) смотрит на
+ * дорогу — фонари и лавочки так сами встают вдоль дороги, куда её ни поверни.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function beside(
+  curve: THREE.CatmullRomCurve3,
+  t: number,
+  offset: number,
+): { position: [number, number, number]; rotation: number } {
+  const p = curve.getPointAt(t);
+  const tan = curve.getTangentAt(t);
+  const nx = -tan.z;
+  const nz = tan.x;
+  const len = Math.hypot(nx, nz) || 1;
+  const ux = nx / len;
+  const uz = nz / len;
+  const dx = -ux * Math.sign(offset);
+  const dz = -uz * Math.sign(offset);
+  return {
+    position: [p.x + ux * offset, GRASS_Y, p.z + uz * offset],
+    rotation: Math.atan2(-dz, dx),
+  };
 }
 
 /** Геометрия плоской ленты вдоль кривой (грунтовая основа дороги). */
@@ -70,7 +117,7 @@ function ribbonGeometry(curve: THREE.CatmullRomCurve3, width: number, y: number,
 const COBBLE = ['#c2bcae', '#b4ae9f', '#cdc7b8', '#aca596'];
 
 /** Мощёная дорога-змейка: грунтовая лента + брусчатка (инстансы). */
-export function WindingPath({ curve }: { curve: THREE.CatmullRomCurve3 }) {
+export const WindingPath = memo(function WindingPath({ curve }: { curve: THREE.CatmullRomCurve3 }) {
   const shoulderGeom = useMemo(() => ribbonGeometry(curve, 1.9, GRASS_Y + 0.02, 140), [curve]);
   const baseGeom = useMemo(() => ribbonGeometry(curve, 1.35, GRASS_Y + 0.035, 140), [curve]);
 
@@ -78,7 +125,7 @@ export function WindingPath({ curve }: { curve: THREE.CatmullRomCurve3 }) {
   const cobbles = useMemo(() => {
     const n = 130;
     const pts = curve.getSpacedPoints(n);
-    const tiles: { p: [number, number, number]; ry: number; s: [number, number, number]; c: string }[] = [];
+    const tiles: Placed[] = [];
     let s = 12345;
     const rand = () => {
       s = (s * 1103515245 + 12345) & 0x7fffffff;
@@ -96,10 +143,12 @@ export function WindingPath({ curve }: { curve: THREE.CatmullRomCurve3 }) {
       nz /= len;
       for (const j of [-1, 0, 1]) {
         const off = j * 0.4 + (rand() - 0.5) * 0.12;
+        const px = p.x + nx * off + (rand() - 0.5) * 0.08;
+        const pz = p.z + nz * off + (rand() - 0.5) * 0.08;
+        const ry = ang + (rand() - 0.5) * 0.5;
+        const s: [number, number, number] = [0.34 + rand() * 0.1, 0.07, 0.34 + rand() * 0.1];
         tiles.push({
-          p: [p.x + nx * off + (rand() - 0.5) * 0.08, GRASS_Y + 0.05, p.z + nz * off + (rand() - 0.5) * 0.08],
-          ry: ang + (rand() - 0.5) * 0.5,
-          s: [0.34 + rand() * 0.1, 0.07, 0.34 + rand() * 0.1],
+          m: chain({ p: [px, GRASS_Y + 0.05, pz], r: [0, ry, 0], s }),
           c: COBBLE[Math.floor(rand() * COBBLE.length)],
         });
       }
@@ -118,16 +167,13 @@ export function WindingPath({ curve }: { curve: THREE.CatmullRomCurve3 }) {
         <meshStandardMaterial color="#8f8672" roughness={1} />
       </mesh>
       {/* брусчатка (плитки лежат на земле — тени только принимают, не отбрасывают) */}
-      <Instances limit={cobbles.length} receiveShadow>
+      <Layer items={cobbles} receiveShadow>
         <boxGeometry args={[1, 1, 1]} />
         <meshStandardMaterial roughness={1} flatShading />
-        {cobbles.map((t, i) => (
-          <Instance key={i} position={t.p} rotation={[0, t.ry, 0]} scale={t.s} color={t.c} />
-        ))}
-      </Instances>
+      </Layer>
     </group>
   );
-}
+});
 
 /**
  * Раскладка станций вдоль пути. Возвращает функцию: индекс категории → точка (x,z).

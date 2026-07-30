@@ -61,12 +61,16 @@ export function getLevelProgress(totalSeconds: number): number {
 /** Максимальный уровень зоны — одинаков снаружи и внутри. */
 export const MAX_LEVEL = ZONE_LEVELS[ZONE_LEVELS.length - 1].level;
 
-/* ──────────── ВНУТРЕННОСТИ ШАХТЫ: ТА ЖЕ лестница, что и снаружи ────────────
+/* ──────────── ВНУТРЕННОСТИ ЗОН: ТА ЖЕ лестница, что и снаружи ────────────
    Раньше внутри шахты жила отдельная шкала на 10 стадий: снаружи «уровень 5 из
    6», внутри «стадия 8 из 10» — одни и те же часы, разные цифры. Теперь ступени
-   ОДНИ: пороги и номера берутся из ZONE_LEVELS, у шахты только свои названия. */
+   ОДНИ: пороги и номера берутся из ZONE_LEVELS, у интерьера только свои
+   названия — у каждой темы свои (шахта копает вглубь, банк богатеет). */
 
-export interface MineStage {
+/** Темы зон, у которых есть свой интерьер: тап по такой станции = провал внутрь. */
+export type InteriorTheme = 'mine' | 'bank';
+
+export interface InteriorStage {
   /** Номер уровня, 0..6 — ровно как снаружи */
   level: number;
   /** Минимум наработанных часов */
@@ -75,35 +79,36 @@ export interface MineStage {
   title: string;
 }
 
-/** Названия уровней шахты (индекс = номер уровня, длина = длине ZONE_LEVELS). */
-const MINE_TITLES = [
-  'Нора',
-  'Штрек',
-  'Первая жила',
-  'Крепь',
-  'Подъёмник',
-  'Кристальный зал',
-  'Сердце горы',
-];
+/** Названия уровней интерьера (индекс = номер уровня, длина = длине ZONE_LEVELS). */
+const INTERIOR_TITLES: Record<InteriorTheme, string[]> = {
+  mine: ['Нора', 'Штрек', 'Первая жила', 'Крепь', 'Подъёмник', 'Кристальный зал', 'Сердце горы'],
+  bank: ['Меняльный угол', 'Лавка менялы', 'Касса', 'Контора', 'Хранилище', 'Центр наблюдения', 'Сокровищница'],
+};
 
-export const MINE_STAGES: MineStage[] = ZONE_LEVELS.map((lvl, i) => ({
-  level: lvl.level,
-  minHours: lvl.minHours,
-  title: MINE_TITLES[i] ?? lvl.title,
-}));
+const stagesOf = (theme: InteriorTheme): InteriorStage[] =>
+  ZONE_LEVELS.map((lvl, i) => ({
+    level: lvl.level,
+    minHours: lvl.minHours,
+    title: INTERIOR_TITLES[theme][i] ?? lvl.title,
+  }));
 
-/** Текущий уровень внутренностей шахты по суммарным секундам категории. */
-export function getMineStage(totalSeconds: number): MineStage {
-  return MINE_STAGES[getZoneLevel(totalSeconds).level];
+export const INTERIOR_STAGES: Record<InteriorTheme, InteriorStage[]> = {
+  mine: stagesOf('mine'),
+  bank: stagesOf('bank'),
+};
+
+/** Есть ли у темы свой интерьер (внутрь можно провалиться). */
+export function hasInterior(theme: string | null | undefined): theme is InteriorTheme {
+  return theme === 'mine' || theme === 'bank';
 }
 
-/** Следующий уровень шахты или null, если достигнуто «Сердце горы». */
-export function getNextMineStage(totalSeconds: number): MineStage | null {
+/** Текущий уровень интерьера по суммарным секундам категории. */
+export function getInteriorStage(theme: InteriorTheme, totalSeconds: number): InteriorStage {
+  return INTERIOR_STAGES[theme][getZoneLevel(totalSeconds).level];
+}
+
+/** Следующий уровень интерьера или null, если достигнут максимум. */
+export function getNextInteriorStage(theme: InteriorTheme, totalSeconds: number): InteriorStage | null {
   const next = getNextLevel(totalSeconds);
-  return next ? MINE_STAGES[next.level] : null;
-}
-
-/** Прогресс к следующему уровню шахты, 0..1 — та же шкала, что и снаружи. */
-export function getMineStageProgress(totalSeconds: number): number {
-  return getLevelProgress(totalSeconds);
+  return next ? INTERIOR_STAGES[theme][next.level] : null;
 }

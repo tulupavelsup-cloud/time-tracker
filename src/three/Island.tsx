@@ -3,22 +3,32 @@
  * экрана (камера ездит внутри неё). Мягкий «игрушечный» 3D по референсам:
  * матовая трава, скруглённые деревья-чанки, кусты, камни, пруды и дороги,
  * соединяющие зоны. Светлый день. Верх земли = GRASS_Y (0).
+ *
+ * Здесь только раскладка: сам повторяющийся декор рисуется полями инстансов
+ * (см. Decor.tsx), поэтому сотни цветов и травинок стоят несколько draw call'ов.
  */
 
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import {
   Bench,
-  Conifer,
+  BushField,
+  ConiferField,
   Fence,
-  Flower,
-  FlowerBed,
-  GrassTuft,
+  FlowerField,
+  GrassField,
   LampPost,
   LilyPad,
   Motes,
-  Mushroom,
-  Pebbles,
+  MushroomField,
+  scatterBed,
+  scatterPebbles,
+  StoneField,
+  TreeField,
+  type FlowerSpec,
+  type StoneSpec,
+  type TuftSpec,
 } from './Decor';
+import { beside, buildPath, distanceToPath, pathSamples } from './Path';
 
 export const GRASS_Y = 0;
 
@@ -40,94 +50,15 @@ function Hill({
   );
 }
 
-/** Дерево: коричневый ствол + большая округлая крона (как на референсе pond). */
-export function Tree({ position, scale = 1 }: { position: [number, number, number]; scale?: number }) {
-  return (
-    <group position={position} scale={scale}>
-      <mesh castShadow position={[0, 0.7, 0]}>
-        <cylinderGeometry args={[0.18, 0.26, 1.4, 12]} />
-        <meshStandardMaterial color="#8a5a33" roughness={1} />
-      </mesh>
-      <group position={[0, 1.95, 0]}>
-        <mesh castShadow>
-          <sphereGeometry args={[0.95, 22, 18]} />
-          <meshStandardMaterial color="#4f9a37" roughness={1} />
-        </mesh>
-        <mesh castShadow position={[0.6, -0.1, 0.15]}>
-          <sphereGeometry args={[0.6, 18, 16]} />
-          <meshStandardMaterial color="#57a53c" roughness={1} />
-        </mesh>
-        <mesh castShadow position={[-0.55, -0.05, -0.12]}>
-          <sphereGeometry args={[0.6, 18, 16]} />
-          <meshStandardMaterial color="#4a9333" roughness={1} />
-        </mesh>
-        <mesh castShadow position={[0.1, 0.55, 0.05]}>
-          <sphereGeometry args={[0.62, 18, 16]} />
-          <meshStandardMaterial color="#68bf49" roughness={1} />
-        </mesh>
-        <mesh castShadow position={[0.16, 0.05, 0.55]}>
-          <sphereGeometry args={[0.5, 18, 16]} />
-          <meshStandardMaterial color="#5fb542" roughness={1} />
-        </mesh>
-        <mesh castShadow position={[-0.14, 0.05, -0.55]}>
-          <sphereGeometry args={[0.5, 18, 16]} />
-          <meshStandardMaterial color="#4a9333" roughness={1} />
-        </mesh>
-      </group>
-    </group>
-  );
-}
-
-/** Круглый кустик. */
-export function Bush({ position, scale = 1 }: { position: [number, number, number]; scale?: number }) {
-  return (
-    <group position={position} scale={scale}>
-      <mesh castShadow position={[0, 0.22, 0]}>
-        <sphereGeometry args={[0.34, 16, 14]} />
-        <meshStandardMaterial color="#54a53a" roughness={1} />
-      </mesh>
-      <mesh castShadow position={[0.28, 0.16, 0.05]}>
-        <sphereGeometry args={[0.24, 14, 12]} />
-        <meshStandardMaterial color="#4c9a34" roughness={1} />
-      </mesh>
-      <mesh castShadow position={[-0.24, 0.16, -0.05]}>
-        <sphereGeometry args={[0.24, 14, 12]} />
-        <meshStandardMaterial color="#61b545" roughness={1} />
-      </mesh>
-    </group>
-  );
-}
-
-/** Гранёный округлый камень. */
-export function Rock({
-  position,
-  scale = 1,
-  rotation = [0, 0, 0],
-  color = '#b3ab95',
-}: {
-  position: [number, number, number];
-  scale?: number | [number, number, number];
-  rotation?: [number, number, number];
-  color?: string;
-}) {
-  return (
-    <mesh castShadow receiveShadow position={position} scale={scale} rotation={rotation}>
-      <icosahedronGeometry args={[0.5, 0]} />
-      <meshStandardMaterial color={color} roughness={1} flatShading />
-    </mesh>
-  );
-}
-
 /** Пруд: песчаный берег, вода с бликом, каменный ободок, кувшинки и камыш. */
 export function Pond({ position, r = 1.6 }: { position: [number, number, number]; r?: number }) {
-  const rim = useMemo(() => {
+  const rim = useMemo<StoneSpec[]>(() => {
     const n = Math.round(r * 10);
     return Array.from({ length: n }, (_, i) => {
       const a = (i / n) * Math.PI * 2;
       const rr = r * (1.02 + (i % 3) * 0.03);
       return {
-        x: Math.cos(a) * rr,
-        z: Math.sin(a) * rr,
+        p: [Math.cos(a) * rr, 0.05, Math.sin(a) * rr] as [number, number, number],
         s: 0.08 + ((i * 7) % 5) * 0.02,
         c: i % 2 ? '#b8b0a0' : '#a29884',
       };
@@ -153,12 +84,7 @@ export function Pond({ position, r = 1.6 }: { position: [number, number, number]
         <meshStandardMaterial color="#6fc6e2" roughness={0.06} metalness={0.25} transparent opacity={0.65} />
       </mesh>
       {/* каменный ободок */}
-      {rim.map((s, i) => (
-        <mesh key={i} castShadow position={[s.x, 0.05, s.z]} scale={s.s}>
-          <icosahedronGeometry args={[1, 0]} />
-          <meshStandardMaterial color={s.c} roughness={1} flatShading />
-        </mesh>
-      ))}
+      <StoneField items={rim} />
       {/* камыш */}
       {reeds.map((rd, i) => (
         <group key={i} position={[rd.x, 0, rd.z]}>
@@ -199,8 +125,23 @@ export function Road({ from, to, width = 1.0 }: { from: [number, number]; to: [n
   );
 }
 
-/** Большая земля + рассыпанный детализирующий декор (за пределами станций). */
-export function Terrain() {
+/**
+ * Большая земля + рассыпанный детализирующий декор (за пределами станций).
+ * memo — чтобы посекундный тик таймера на экране «Домой» не пересобирал мир.
+ */
+export const Terrain = memo(function Terrain() {
+  // дорога-змейка: по ней расставляем фонари с лавочкой и с неё же убираем
+  // декор, который иначе торчал бы сквозь брусчатку
+  const road = useMemo(() => {
+    const curve = buildPath();
+    return {
+      samples: pathSamples(curve),
+      lampA: beside(curve, 0.24, 1.3),
+      lampB: beside(curve, 0.66, -1.3),
+      bench: beside(curve, 0.45, 1.25),
+    };
+  }, []);
+
   // Разбросанный декор — стабильные позиции (без random в рантайме)
   const decor = useMemo(() => {
     const trees: [number, number, number][] = [
@@ -232,14 +173,55 @@ export function Terrain() {
       [-3, -5, 11], [5, 4, 22], [-6, 7, 33], [8, -2, 44], [-9, -1, 55], [2, 8, 66],
     ];
     const flowerBeds: { p: [number, number, number]; r: number; n: number; seed: number }[] = [
-      { p: [-4, GRASS_Y, -2], r: 1.4, n: 12, seed: 11 },
+      { p: [-5.8, GRASS_Y, -3.2], r: 1.4, n: 12, seed: 11 },
       { p: [5, GRASS_Y, 3], r: 1.6, n: 14, seed: 22 },
       { p: [-6, GRASS_Y, 6], r: 1.2, n: 10, seed: 33 },
       { p: [7, GRASS_Y, -5], r: 1.3, n: 11, seed: 44 },
       { p: [1, GRASS_Y, 9], r: 1.1, n: 9, seed: 55 },
     ];
-    return { trees, conifers, bushes, rocks, mushrooms, tufts, pebbles, flowerBeds };
-  }, []);
+
+    // раскладываем всё, что рисуется полями инстансов
+    const treeItems = trees.map(([x, z, scale]) => ({ x, z, scale }));
+    const coniferItems = conifers.map(([x, z, scale]) => ({ x, z, scale }));
+    const bushItems = bushes.map(([x, z, scale]) => ({ x, z, scale }));
+    const mushroomItems = mushrooms.map(([x, z, scale]) => ({ x, z, scale }));
+
+    // камни: валуны + кучки гальки (икосаэдр у Rock был радиусом 0.5 — отсюда s/2)
+    const stoneItems: StoneSpec[] = rocks.map(([x, z, s, rot]) => ({
+      p: [x, GRASS_Y, z],
+      s: s * 0.5,
+      r: [0, rot, 0.1],
+      c: '#b3ab95',
+    }));
+    for (const [x, z, seed] of pebbles) stoneItems.push(...scatterPebbles([x, GRASS_Y, z], seed));
+
+    // цветы и травинки: одиночные акценты + клумбы
+    const flowerItems: FlowerSpec[] = [
+      { x: 0.4, z: -1.2, color: '#f6d24b', scale: 1.3, rot: 0 },
+      { x: -1.1, z: 0.8, color: '#e86ca8', scale: 1.2, rot: 0 },
+    ];
+    const tuftItems: TuftSpec[] = tufts.map(([x, z, scale]) => ({ x, z, scale, seedX: x, seedZ: z }));
+    for (const bed of flowerBeds) {
+      const { flowers, tufts: bedTufts } = scatterBed({ position: bed.p, radius: bed.r, count: bed.n, seed: bed.seed });
+      flowerItems.push(...flowers);
+      tuftItems.push(...bedTufts);
+    }
+
+    // всё, что попало на дорогу, убираем: травинки и цветы иначе торчат сквозь
+    // брусчатку, а дерево встаёт посреди проезда. Радиус — по размеру кроны.
+    const clear = <T extends { x: number; z: number }>(items: T[], r: number) =>
+      items.filter((it) => distanceToPath(road.samples, it.x, it.z) > r);
+
+    return {
+      treeItems: clear(treeItems, 1.9),
+      coniferItems: clear(coniferItems, 1.9),
+      bushItems: clear(bushItems, 1.5),
+      mushroomItems: clear(mushroomItems, 1.1),
+      stoneItems: stoneItems.filter((s) => distanceToPath(road.samples, s.p[0], s.p[2]) > 1.1),
+      flowerItems: clear(flowerItems, 1.05),
+      tuftItems: clear(tuftItems, 1.05),
+    };
+  }, [road.samples]);
 
   return (
     <group>
@@ -279,45 +261,26 @@ export function Terrain() {
       <Pond position={[9, GRASS_Y, -4]} r={2.2} />
       <Pond position={[-9, GRASS_Y, 8]} r={1.8} />
 
-      {/* Деревья и ёлки */}
-      {decor.trees.map(([x, z, s], i) => (
-        <Tree key={`t${i}`} position={[x, GRASS_Y, z]} scale={s} />
-      ))}
-      {decor.conifers.map(([x, z, s], i) => (
-        <Conifer key={`c${i}`} position={[x, GRASS_Y, z]} scale={s} />
-      ))}
-      {decor.bushes.map(([x, z, s], i) => (
-        <Bush key={`b${i}`} position={[x, GRASS_Y, z]} scale={s} />
-      ))}
-      {decor.rocks.map(([x, z, s, rot], i) => (
-        <Rock key={`r${i}`} position={[x, GRASS_Y, z]} scale={s} rotation={[0, rot, 0.1]} />
-      ))}
+      {/* Деревья, ёлки, кусты и камни */}
+      <TreeField items={decor.treeItems} />
+      <ConiferField items={decor.coniferItems} />
+      <BushField items={decor.bushItems} />
+      <StoneField items={decor.stoneItems} />
 
       {/* Мелочь для рассматривания */}
-      {decor.flowerBeds.map((b, i) => (
-        <FlowerBed key={`fb${i}`} position={b.p} radius={b.r} count={b.n} seed={b.seed} />
-      ))}
-      {decor.mushrooms.map(([x, z, s], i) => (
-        <Mushroom key={`m${i}`} position={[x, GRASS_Y, z]} scale={s} />
-      ))}
-      {decor.tufts.map(([x, z, s], i) => (
-        <GrassTuft key={`g${i}`} position={[x, GRASS_Y, z]} scale={s} />
-      ))}
-      {decor.pebbles.map(([x, z, seed], i) => (
-        <Pebbles key={`p${i}`} position={[x, GRASS_Y, z]} seed={seed} />
-      ))}
+      <FlowerField items={decor.flowerItems} />
+      <GrassField items={decor.tuftItems} />
+      <MushroomField items={decor.mushroomItems} />
 
-      {/* одиночные акценты у дорог/прудов */}
-      <Flower position={[0.4, GRASS_Y, -1.2]} color="#f6d24b" scale={1.3} />
-      <Flower position={[-1.1, GRASS_Y, 0.8]} color="#e86ca8" scale={1.2} />
-      <LampPost position={[2.6, GRASS_Y, -1.4]} rotation={-0.6} />
-      <LampPost position={[-3.2, GRASS_Y, 2.6]} rotation={2.1} />
-      <Bench position={[-10.6, GRASS_Y, 8]} rotation={0.5} />
-      <Fence from={[6.4, -6.6]} to={[9.4, -6]} />
-      <Fence from={[-6.4, 4.6]} to={[-4.4, 6.8]} />
+      {/* одиночные акценты: фонари и лавочка сами встают вдоль дороги */}
+      <LampPost position={road.lampA.position} rotation={road.lampA.rotation} />
+      <LampPost position={road.lampB.position} rotation={road.lampB.rotation} />
+      <Bench position={road.bench.position} rotation={road.bench.rotation} />
+      <Fence from={[7.4, -6.6]} to={[10.4, -6]} />
+      <Fence from={[-7.4, 4.6]} to={[-5.4, 6.8]} />
 
       {/* парящая пыльца на солнце */}
       <Motes count={18} area={26} />
     </group>
   );
-}
+});

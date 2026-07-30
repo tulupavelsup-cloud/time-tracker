@@ -13,6 +13,8 @@
  * working=true — размахивает рукой и качается активнее (идёт таймер).
  * mode='mine' — режим шахты: в руке кирка, персонаж лупит по жиле, изредка
  * вытирает лоб и кидает кусок руды в вагонетку (см. MineInterior).
+ * mode='bank' — режим банка: считает монеты за стойкой, разглядывает одну на
+ * свет и кладёт в стопку (см. BankInterior).
  */
 
 import { useRef } from 'react';
@@ -300,6 +302,8 @@ function Pick() {
 
 /** Длительность полного цикла работы в шахте, сек. */
 const MINE_CYCLE = 14;
+/** Длительность полного цикла работы за стойкой банка, сек. */
+const BANK_CYCLE = 11;
 /** Один замах-удар киркой, сек. */
 const SWING = 1.15;
 /** Момент внутри замаха, когда остриё встречает камень (0..1). */
@@ -321,8 +325,12 @@ export function Character3D({
 }: {
   working?: boolean;
   scale?: number;
-  /** 'mine' — цикл шахтёра: удары киркой, вытирает лоб, кидает руду */
-  mode?: 'map' | 'mine';
+  /**
+   * 'mine' — цикл шахтёра: удары киркой, вытирает лоб, кидает руду;
+   * 'bank' — цикл кассира: считает монеты у стойки, разглядывает одну на свет
+   * и кладёт её в стопку (одежда при этом обычная, как на карте)
+   */
+  mode?: 'map' | 'mine' | 'bank';
   tool?: 'none' | 'pick';
   /** На сколько повернуться к зрителю, когда вытирает лоб (радианы) */
   faceYaw?: number;
@@ -330,7 +338,7 @@ export function Character3D({
   tossYaw?: number;
   /** Кирка встретила камень — снаружи можно сыпануть осколки */
   onHit?: () => void;
-  /** Кусок руды выпущен из руки — снаружи можно запустить его в вагонетку */
+  /** Кусок руды (в банке — монета) выпущен из руки: снаружи можно его запустить */
   onToss?: () => void;
 }) {
   const root = useRef<THREE.Group>(null);
@@ -430,6 +438,71 @@ export function Character3D({
       return;
     }
 
+    /* ── режим банка: работа за стойкой ── */
+    if (mode === 'bank') {
+      const r = root.current;
+      const h = head.current;
+      const aL = armL.current;
+      const aR = armR.current;
+      if (!r || !h || !aL || !aR) return;
+
+      // касса закрыта: стоит за стойкой, дышит и поглядывает по сторонам
+      if (!working) {
+        r.position.y = Math.sin(t * 1.1) * 0.014;
+        r.rotation.set(0.02, 0, Math.sin(t * 0.5) * 0.02);
+        h.rotation.set(0.04, Math.sin(t * 0.45) * 0.3, Math.sin(t * 0.45 + 1) * 0.04);
+        aL.rotation.set(Math.sin(t * 1.1) * 0.05, 0, 0.06);
+        aR.rotation.set(Math.sin(t * 1.1 + 0.9) * 0.05, 0, -0.06);
+        if (ore.current) ore.current.visible = false;
+        return;
+      }
+
+      const p = t % BANK_CYCLE;
+
+      if (p < 6.4) {
+        /* ── считает монеты: обе руки коротко работают над стойкой ── */
+        const a = Math.sin(t * 5.2);
+        const b = Math.sin(t * 5.2 + 1.7);
+        aL.rotation.set(-0.85 + a * 0.22, 0, 0.14);
+        aR.rotation.set(-0.85 + b * 0.22, 0, -0.14);
+        r.rotation.set(0.11, 0, 0);
+        r.position.y = 0;
+        h.rotation.set(0.3, a * 0.05, 0);
+        if (ore.current) ore.current.visible = false;
+      } else if (p < 8.8) {
+        /* ── поднимает монету к глазам и разглядывает (заодно к зрителю) ── */
+        const u = (p - 6.4) / 2.4;
+        const ease = Math.min(1, Math.min(u, 1 - u) / 0.25);
+        aL.rotation.set(lerp(-0.85, -2.15, ease), 0, lerp(0.14, -0.32, ease));
+        aR.rotation.set(lerp(-0.85, -0.2, ease), 0, -0.1);
+        r.rotation.set(lerp(0.11, 0.01, ease), lerp(0, faceYaw, ease), 0);
+        r.position.y = Math.sin(t * 1.6) * 0.01;
+        h.rotation.set(lerp(0.3, -0.06, ease), lerp(0, 0.12, ease), Math.sin(t * 2) * 0.04);
+        if (ore.current) ore.current.visible = ease > 0.35;
+        tossed.current = false;
+      } else {
+        /* ── кладёт монету в стопку: короткий бросок вбок ── */
+        const u = (p - 8.8) / (BANK_CYCLE - 8.8);
+        let al: number;
+        if (u < 0.45) al = lerp(-2.15, -1.15, easeOut(u / 0.45));
+        else if (u < 0.62) al = lerp(-1.15, -0.35, easeIn((u - 0.45) / 0.17));
+        else al = lerp(-0.35, -0.85, (u - 0.62) / 0.38);
+        const turn = Math.min(1, Math.min(u, 1 - u) / 0.22);
+        aL.rotation.set(al, 0, lerp(-0.32, 0.14, Math.min(1, u / 0.62)));
+        aR.rotation.set(-0.8, 0, -0.12);
+        r.rotation.set(0.06, lerp(0.02, tossYaw, turn), 0);
+        r.position.y = 0;
+        h.rotation.set(0.16, lerp(0, 0.2, turn), 0);
+        // монета видна в кулаке, пока не выпущена
+        if (ore.current) ore.current.visible = u < 0.62;
+        if (!tossed.current && u >= 0.62) {
+          tossed.current = true;
+          onToss?.();
+        }
+      }
+      return;
+    }
+
     /* ── режим карты: как было — покачивание и махи рукой ── */
     const speed = working ? 3.1 : 1.4;
     if (root.current) {
@@ -447,7 +520,9 @@ export function Character3D({
   });
 
   // В шахте та же кукла переодета в рабочее: рубаха, оливковые штаны, ботинки.
+  // В банке — обычная одежда карты, только в кулаке не руда, а золотая монета.
   const mine = mode === 'mine';
+  const bank = mode === 'bank';
   const top = mine ? SHIRT : TEE;
 
   return (
@@ -556,10 +631,24 @@ export function Character3D({
           <sphereGeometry args={[0.062, 16, 14]} />
           <meshStandardMaterial color={SKIN} roughness={0.5} />
         </mesh>
-        {/* кусок руды в кулаке — появляется только на броске */}
-        <mesh ref={ore} visible={false} castShadow position={[-0.052, -0.485, 0.03]} scale={0.1} rotation={[0.4, 0.6, 0]}>
-          <icosahedronGeometry args={[1, 0]} />
-          <meshStandardMaterial color="#4a4438" roughness={1} flatShading />
+        {/* кусок руды (в банке — монета) в кулаке: появляется только на броске */}
+        <mesh
+          ref={ore}
+          visible={false}
+          castShadow
+          position={[-0.052, -0.485, 0.03]}
+          scale={bank ? 1 : 0.1}
+          rotation={bank ? [1.35, 0, 0.35] : [0.4, 0.6, 0]}
+        >
+          {bank ? <cylinderGeometry args={[0.075, 0.075, 0.022, 14]} /> : <icosahedronGeometry args={[1, 0]} />}
+          <meshStandardMaterial
+            color={bank ? '#f3cf5f' : '#4a4438'}
+            emissive={bank ? '#c8a13e' : '#000000'}
+            emissiveIntensity={bank ? 0.25 : 0}
+            roughness={bank ? 0.35 : 1}
+            metalness={bank ? 0.5 : 0}
+            flatShading={!bank}
+          />
         </mesh>
       </group>
       <group ref={armR} position={[0.205, 1.2, 0]}>

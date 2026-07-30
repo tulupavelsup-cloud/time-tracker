@@ -1,11 +1,11 @@
 /**
  * 3D-главная во весь экран: большой светлый мир, по которому можно ездить
  * (перетаскивание/зум/наклон, OrbitControls). Зоны-станции расставлены по миру
- * и соединены дорогами; шахта — 3D-модель, растущая по уровням зоны
- * (0..6, thresholds.ts). Тап по станции открывает панель
- * (StationSheet), а тап по шахте — проваливает внутрь неё: камера ныряет в
- * портал и сцена сменяется на интерьер (MineInterior) в том же Canvas.
- * Интерфейс приложения плавает стеклом поверх (см. Map.tsx).
+ * и соединены дорогами; шахта и банк — 3D-модели, растущие по уровням зоны
+ * (0..6, thresholds.ts). Тап по обычной станции открывает панель
+ * (StationSheet), а тап по шахте или банку — проваливает внутрь: камера ныряет
+ * в портал зоны и сцена сменяется на её интерьер (MineInterior/BankInterior) в
+ * том же Canvas. Интерфейс приложения плавает стеклом поверх (см. Map.tsx).
  */
 
 import { Suspense, useCallback, useEffect, useMemo, useRef } from 'react';
@@ -15,16 +15,79 @@ import * as THREE from 'three';
 import type { Category } from '../api';
 import { formatDuration } from '../lib/format';
 import { categoryColor } from '../lib/palette';
-import { getZoneLevel } from '../lib/thresholds';
+import { getZoneLevel, type InteriorTheme } from '../lib/thresholds';
 import { Terrain, GRASS_Y } from './Island';
+import { Bank3D } from './Bank3D';
+import { BankInterior } from './BankInterior';
 import { Mine3D } from './Mine3D';
 import { MineInterior } from './MineInterior';
 import { StationSign } from './Props3D';
 import { Character3D } from './Character3D';
 import { buildPath, stationLayout, WindingPath } from './Path';
 
-/** Что показываем: карту, нырок в шахту, интерьер шахты или подъём наружу. */
+/** Что показываем: карту, нырок в зону, её интерьер или подъём наружу. */
 export type SceneView = 'map' | 'dive' | 'inside' | 'rise';
+
+const DEG = Math.PI / 180;
+/** Обзорный кадр: наклон, поворот и угол зрения камеры карты. */
+const CAM_FOV = 55;
+const CAM_ELEV = 48 * DEG;
+const CAM_AZIM = 18 * DEG;
+/** Доля высоты экрана, свободная под мир (сверху сводка, снизу подсказка и таб-бар). */
+const WORLD_BAND = 0.62;
+
+/**
+ * Кадр карты: камера отъезжает ровно настолько, чтобы в него попали ВСЕ станции
+ * сразу — и по ширине экрана, и по глубине. Иначе на телефоне (узкий кадр:
+ * ~12 юнитов в ширину против тридцати с лишним в глубину) видно одну станцию, и
+ * до остальных надо долго тащить карту — а значит, нельзя выбрать категорию.
+ */
+function fitFrame(points: [number, number][]) {
+  const xs = points.length ? points.map((p) => p[0]) : [0];
+  const zs = points.length ? points.map((p) => p[1]) : [0];
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minZ = Math.min(...zs);
+  const maxZ = Math.max(...zs);
+  const center: [number, number] = [(minX + maxX) / 2, (minZ + maxZ) / 2];
+  // Габариты считаем в осях камеры, а не мира: она повёрнута на CAM_AZIM, и по
+  // осям мира ширина выходит меньше настоящей — крайняя станция уезжала за край.
+  // u — вправо по экрану, v — в глубину.
+  const cosA = Math.cos(CAM_AZIM);
+  const sinA = Math.sin(CAM_AZIM);
+  let maxU = 0;
+  let maxV = 0;
+  for (const [x, z] of points.length ? points : ([[0, 0]] as [number, number][])) {
+    const dx = x - center[0];
+    const dz = z - center[1];
+    maxU = Math.max(maxU, Math.abs(dx * cosA - dz * sinA));
+    maxV = Math.max(maxV, Math.abs(-dx * sinA - dz * cosA));
+  }
+  // станция — точка, а модель с подписью занимают вокруг неё ещё пару юнитов
+  const halfW = maxU + 3;
+  const halfD = maxV + 2.6;
+  const aspect =
+    typeof window === 'undefined' ? 0.5 : Math.max(0.4, window.innerWidth / window.innerHeight);
+  const tanV = Math.tan((CAM_FOV / 2) * DEG);
+  const byWidth = halfW / (tanV * aspect);
+  const byDepth = ((halfD / WORLD_BAND) * Math.sin(CAM_ELEV)) / tanV;
+  const dist = Math.min(42, Math.max(9, Math.max(byWidth, byDepth)));
+  const pos: [number, number, number] = [
+    center[0] + dist * Math.cos(CAM_ELEV) * Math.sin(CAM_AZIM),
+    dist * Math.sin(CAM_ELEV),
+    center[1] + dist * Math.cos(CAM_ELEV) * Math.cos(CAM_AZIM),
+  ];
+  return { pos, center, dist };
+}
+
+/** Раскладка мира: путь, станции на нём и обзорный кадр камеры. */
+interface Layout {
+  curve: THREE.CatmullRomCurve3;
+  placed: Category[];
+  mineIndex: number;
+  posOf: (catIndex: number) => [number, number];
+  frame: ReturnType<typeof fitFrame>;
+}
 
 /** Сохранённая поза камеры карты — чтобы вернуться ровно туда, откуда нырнули. */
 interface SavedPose {
@@ -37,14 +100,18 @@ interface HomeSceneProps {
   totals: Map<string, number>;
   activeCategoryId: string | null;
   onOpen: (id: string) => void;
-  /** Демо: принудительный уровень зоны с 3D-моделью — шахты (null = по часам). */
+  /** Демо: принудительный уровень 3D-зон — шахты и банка (null = по часам). */
   levelOverride?: number | null;
-  /** Режим сцены: карта / нырок / внутри шахты / подъём */
+  /** Режим сцены: карта / нырок / внутри зоны / подъём */
   view?: SceneView;
-  /** Уровень шахты 0..6 — тот же, что снаружи (MINE_STAGES = ZONE_LEVELS) */
-  mineLevel?: number;
-  /** Идёт ли таймер шахты — внутри от этого зависит, работает ли герой */
-  mineActive?: boolean;
+  /** Тема зоны, внутрь которой провалились: от неё зависит, какой интерьер. */
+  insideTheme?: InteriorTheme;
+  /** id станции, в которую ныряем — камера летит именно в её портал. */
+  insideId?: string | null;
+  /** Уровень зоны 0..6 — тот же, что снаружи (INTERIOR_STAGES = ZONE_LEVELS) */
+  insideLevel?: number;
+  /** Идёт ли таймер зоны — внутри от этого зависит, работает ли герой */
+  insideActive?: boolean;
 }
 
 function Station({
@@ -63,9 +130,11 @@ function Station({
   levelOverride?: number | null;
 }) {
   const isMine = cat.theme === 'mine';
-  // у зоны с 3D-моделью уровень можно принудить (демо-переключатель)
-  const level = isMine && levelOverride != null ? levelOverride : getZoneLevel(seconds).level;
-  const scale = isMine ? 0.72 : 0.9;
+  const isBank = cat.theme === 'bank';
+  // у зон с 3D-моделью уровень можно принудить (демо-переключатель)
+  const modelled = isMine || isBank;
+  const level = modelled && levelOverride != null ? levelOverride : getZoneLevel(seconds).level;
+  const scale = isMine ? 0.72 : isBank ? 0.8 : 0.9;
   return (
     <group position={[pos[0], GRASS_Y, pos[1]]}>
       <group
@@ -84,6 +153,8 @@ function Station({
       >
         {isMine ? (
           <Mine3D level={level} active={active} />
+        ) : isBank ? (
+          <Bank3D level={level} active={active} />
         ) : (
           <StationSign color={categoryColor(cat.color)} />
         )}
@@ -92,27 +163,32 @@ function Station({
           <meshBasicMaterial />
         </mesh>
       </group>
+      {/* Подпись — постоянного размера (без distanceFactor): в обзорном кадре
+          камера далеко, и масштабируемая подпись становится нечитаемой — а по
+          ней как раз и выбирают станцию. */}
       <Html
-        position={[0, isMine ? 2.4 : 2.1, 0]}
+        position={[0, isMine ? 2.4 : isBank ? 2.3 : 2.1, 0]}
         center
-        distanceFactor={13}
         zIndexRange={[10, 0]}
         style={{ pointerEvents: 'none' }}
       >
+        {/* две строки, а не одна: в строку «Финансы · 34 ч 43 мин» табличка
+            уезжала за край экрана у крайней станции */}
         <div
           style={{
             whiteSpace: 'nowrap',
+            textAlign: 'center',
             background: '#fff',
             color: '#1f2937',
-            fontWeight: 600,
-            fontSize: 13,
-            padding: '3px 9px',
-            borderRadius: 999,
+            padding: '3px 10px 4px',
+            borderRadius: 14,
             boxShadow: '0 4px 14px rgba(0,0,0,.22)',
             fontFamily: 'Golos Text, sans-serif',
+            lineHeight: 1.15,
           }}
         >
-          {cat.name} · {formatDuration(seconds)}
+          <div style={{ fontWeight: 600, fontSize: 13 }}>{cat.name}</div>
+          <div style={{ fontSize: 11, color: '#6b7280' }}>{formatDuration(seconds)}</div>
         </div>
       </Html>
     </group>
@@ -234,27 +310,30 @@ function PoseKeeper({ poseRef }: { poseRef: React.MutableRefObject<SavedPose | n
 }
 
 function SceneContents({
-  categories,
   totals,
   activeCategoryId,
   onOpen,
   levelOverride,
   view = 'map',
+  insideId,
+  insideTheme = 'mine',
   poseRef,
-}: HomeSceneProps & { poseRef: React.MutableRefObject<SavedPose | null> }) {
-  const curve = useMemo(() => buildPath(), []);
-  const placed = categories.slice(0, 6);
-  const mineIndex = placed.findIndex((c) => c.theme === 'mine');
-  const posOf = useMemo(
-    () => stationLayout(curve, placed.length, mineIndex),
-    [curve, placed.length, mineIndex],
-  );
+  layout,
+}: HomeSceneProps & { poseRef: React.MutableRefObject<SavedPose | null>; layout: Layout }) {
+  const { curve, placed, mineIndex, posOf, frame } = layout;
   // на время жеста роняем разрешение и возвращаем его в покое
   const quality = useDragQuality();
   const activeIndex = placed.findIndex((c) => c.id === activeCategoryId);
   const restIndex = mineIndex >= 0 ? mineIndex : 0;
   const charSpot = placed.length ? posOf(activeIndex >= 0 ? activeIndex : restIndex) : ([0, 0] as [number, number]);
-  const mineSpot = placed.length ? posOf(restIndex) : ([0, 0] as [number, number]);
+  // Ныряем в ТУ станцию, по которой тапнули: у шахты портал — очаг входа, у
+  // банка — дверь на фасаде (она выше и ближе к зрителю).
+  const diveIndex = insideId ? placed.findIndex((c) => c.id === insideId) : -1;
+  const diveSpot = placed.length ? posOf(diveIndex >= 0 ? diveIndex : restIndex) : ([0, 0] as [number, number]);
+  const portal: [number, number, number] =
+    insideTheme === 'bank'
+      ? [diveSpot[0], GRASS_Y + 0.52, diveSpot[1] + 0.3]
+      : [diveSpot[0], GRASS_Y + 0.58, diveSpot[1] + 0.25];
 
   return (
     <>
@@ -320,58 +399,57 @@ function SceneContents({
           к любой станции, два пальца = поворот. Не «кручение вокруг точки».
           На нырке управление отключено — камерой рулит DiveRig. */}
       <MapControls
-        target={[mineSpot[0], 0.4, mineSpot[1]]}
+        target={[frame.center[0], 0.4, frame.center[1]]}
         enabled={view === 'map'}
         enableDamping
         dampingFactor={0.16}
         onStart={quality.onStart}
         onEnd={quality.onEnd}
         minDistance={2.5}
-        maxDistance={30}
+        maxDistance={frame.dist + 8}
         minPolarAngle={0.3}
         maxPolarAngle={1.35}
         makeDefault
       />
 
       <PoseKeeper poseRef={poseRef} />
-      <DiveRig
-        active={view === 'dive'}
-        portal={[mineSpot[0], GRASS_Y + 0.58, mineSpot[1] + 0.25]}
-        poseRef={poseRef}
-      />
+      <DiveRig active={view === 'dive'} portal={portal} poseRef={poseRef} />
     </>
   );
 }
 
 export function HomeScene(props: HomeSceneProps) {
-  const { view = 'map', mineLevel = 0, mineActive = false } = props;
-  // стартовая камера возле центральной точки пути (там ориентир-шахта):
-  // приподнята и ближе — изо-ракурс как на референсах, шахта в нижней части
-  // кадра (не за верхней стеклянной панелью), видно кольцо рельсов сверху
-  const camPos = useMemo(() => {
-    const p = buildPath().getPointAt(0.58);
-    return [p.x + 4.5, 8, p.z + 7.5] as [number, number, number];
-  }, []);
-  // поза камеры карты переживает уход в шахту и обратно
+  const { view = 'map', insideTheme = 'mine', insideLevel = 0, insideActive = false, categories } = props;
+  // Раскладка мира и обзорный кадр: считаем один раз на набор категорий —
+  // на старте в кадре все станции, дальше можно подъехать к любой.
+  const layout = useMemo<Layout>(() => {
+    const curve = buildPath();
+    const placed = categories.slice(0, 6);
+    const mineIndex = placed.findIndex((c) => c.theme === 'mine');
+    const posOf = stationLayout(curve, placed.length, mineIndex);
+    return { curve, placed, mineIndex, posOf, frame: fitFrame(placed.map((_, i) => posOf(i))) };
+  }, [categories]);
+  // поза камеры карты переживает уход в зону и обратно
   const poseRef = useRef<SavedPose | null>(null);
   // мир карты живёт на карте и во время нырка, интерьер — внутри и на подъёме
   const showMap = view === 'map' || view === 'dive';
+  const Interior = insideTheme === 'bank' ? BankInterior : MineInterior;
 
   return (
     <Canvas
       shadows
       dpr={[1, 2]}
-      camera={{ position: camPos, fov: 42 }}
+      camera={{ position: layout.frame.pos, fov: CAM_FOV }}
       gl={{ antialias: true }}
       style={{ touchAction: 'none' }}
     >
-      {/* тени пересчитываются реже, чем кадры — общее для карты и шахты */}
+      {/* тени пересчитываются реже, чем кадры — общее для карты и интерьеров */}
       <ShadowPacer />
       <Suspense fallback={null}>
         {showMap ? (
-          <SceneContents {...props} poseRef={poseRef} />
+          <SceneContents {...props} poseRef={poseRef} layout={layout} />
         ) : (
-          <MineInterior level={mineLevel} active={mineActive} />
+          <Interior level={insideLevel} active={insideActive} />
         )}
       </Suspense>
     </Canvas>

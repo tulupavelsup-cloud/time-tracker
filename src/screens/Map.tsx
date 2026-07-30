@@ -4,10 +4,11 @@
  * острове; шахта и банк — 3D-модели, к которым можно подъехать и рассмотреть.
  *
  * Тап по обычной станции открывает панель запуска таймера (StationSheet), а тап
- * по ШАХТЕ проваливает внутрь: камера ныряет в портал, экран гаснет и
- * раскрывается полноэкранный 3D-интерьер шахты (MineInterior) в том же наклоне,
- * где герой долбит киркой жилу. Плашки при этом нет — только тонкий стеклянный
- * слой: назад, стадия, часы и «Стоп»; подробности — свайпом снизу вверх.
+ * по зоне со своим интерьером (ШАХТА, БАНК) проваливает внутрь: камера ныряет в
+ * портал, экран гаснет и раскрывается полноэкранный 3D-интерьер в том же
+ * наклоне — в шахте герой долбит киркой жилу, в банке считает монеты за
+ * стойкой. Плашки при этом нет — только тонкий стеклянный слой: назад, стадия,
+ * часы и «Стоп»; подробности — свайпом снизу вверх.
  */
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -27,12 +28,14 @@ import {
   type Task,
 } from '../api';
 import {
-  getMineStage,
-  getMineStageProgress,
-  getNextMineStage,
+  getLevelProgress,
+  getNextInteriorStage,
+  getZoneLevel,
+  hasInterior,
+  INTERIOR_STAGES,
   MAX_LEVEL,
-  MINE_STAGES,
   ZONE_LEVELS,
+  type InteriorTheme,
 } from '../lib/thresholds';
 import { elapsedSeconds, formatClock, formatDuration, formatHours } from '../lib/format';
 import { categoryColor } from '../lib/palette';
@@ -48,9 +51,39 @@ import type { Tab } from '../App';
 // 3D-сцена — отдельным чанком (three.js тяжёлый): грузится только на «Домой».
 const HomeScene = lazy(() => import('../three/HomeScene').then((m) => ({ default: m.HomeScene })));
 
-/** Сколько длится нырок в шахту и подъём обратно, мс. */
+/** Сколько длится нырок в зону и подъём обратно, мс. */
 const DIVE_MS = 850;
 const RISE_MS = 420;
+
+/**
+ * Слова интерьера: у каждой зоны свой словарь, чтобы «Копать» и «Шахта
+ * отдыхает» не встречали пользователя в банке.
+ */
+const INSIDE_TEXT: Record<InteriorTheme, {
+  back: string;
+  idle: string;
+  running: string;
+  start: string;
+  party: string;
+  top: string;
+}> = {
+  mine: {
+    back: 'Выйти из шахты',
+    idle: 'Шахта отдыхает',
+    running: 'Идёт работа',
+    start: 'Копать',
+    party: 'Порода поддалась. Шахта стала глубже — так и строятся империи.',
+    top: 'глубже некуда — Сердце горы',
+  },
+  bank: {
+    back: 'Выйти из банка',
+    idle: 'Касса закрыта',
+    running: 'Касса открыта',
+    start: 'Считать',
+    party: 'Касса сошлась. Банк стал богаче — так и строятся империи.',
+    top: 'богаче некуда — Сокровищница',
+  },
+};
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -60,9 +93,11 @@ function greeting(): string {
   return 'Доброй ночи';
 }
 
-interface MineCelebration {
+interface ZoneCelebration {
   minutes: number;
   stageTitle: string | null;
+  /** Поздравление своими словами для этой зоны (шахта копает, банк богатеет) */
+  text: string;
 }
 
 export function MapScreen({
@@ -84,16 +119,16 @@ export function MapScreen({
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [openedId, setOpenedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // Погружение в шахту: карта → нырок → внутри → подъём → карта
+  // Погружение в зону: карта → нырок → внутри → подъём → карта
   const [view, setView] = useState<SceneView>('map');
   const [insideId, setInsideId] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [mineParty, setMineParty] = useState<MineCelebration | null>(null);
+  const [party, setParty] = useState<ZoneCelebration | null>(null);
   const timers = useRef<number[]>([]);
   const deepLinked = useRef(false);
-  // Демо: принудительный уровень шахты для просмотра всех стадий (null = по
-  // часам). Шкала ОДНА снаружи и внутри (0..6), поэтому переключатель тоже
-  // один. Задаётся через ?level=0..6 (?stage= — старый алиас из QA-ссылок).
+  // Демо: принудительный уровень зон (шахта, банк) для просмотра всех стадий
+  // (null = по часам). Шкала ОДНА снаружи и внутри (0..6), поэтому переключатель
+  // тоже один. Задаётся через ?level=0..6 (?stage= — старый алиас из QA-ссылок).
   const [demoLevel, setDemoLevel] = useState<number | null>(() => {
     if (!IS_DEMO || typeof window === 'undefined') return null;
     const params = new URLSearchParams(window.location.search);
@@ -119,12 +154,13 @@ export function MapScreen({
     setActive(session);
     setLast(lastSession);
     // Диплинк ?station=<тема> — открыть станцию сразу (удобно для QA-скринов).
-    // Для шахты это сразу интерьер, без нырка. Срабатывает только на первой загрузке.
+    // Для зон с интерьером (шахта, банк) это сразу интерьер, без нырка.
+    // Срабатывает только на первой загрузке.
     const stationParam = new URLSearchParams(window.location.search).get('station');
     if (stationParam && !deepLinked.current) {
       deepLinked.current = true;
       const target = cats.find((c) => c.theme === stationParam);
-      if (target && target.theme === 'mine') {
+      if (target && hasInterior(target.theme)) {
         setInsideId(target.id);
         setView('inside');
       } else if (target) {
@@ -178,22 +214,22 @@ export function MapScreen({
     return () => ids.forEach((id) => window.clearTimeout(id));
   }, []);
 
-  // прячем шапку и таб-бар, пока мы под землёй
+  // прячем шапку и таб-бар, пока мы внутри зоны
   useEffect(() => {
     onImmersion?.(view !== 'map');
     return () => onImmersion?.(false);
   }, [view, onImmersion]);
 
-  /** Тап по станции: шахта — проваливаемся внутрь, остальные — прежняя панель. */
+  /** Тап по станции: шахта и банк — проваливаемся внутрь, остальные — панель. */
   function handleStation(id: string) {
     const cat = categories.find((c) => c.id === id);
     if (!cat) return;
-    if (cat.theme === 'mine') void enterMine(cat);
+    if (hasInterior(cat.theme)) void enterZone(cat);
     else setOpenedId(id);
   }
 
-  /** Ныряем в шахту и сразу запускаем её таймер (созвон №5: тап = таймер). */
-  async function enterMine(cat: Category) {
+  /** Ныряем внутрь зоны и сразу запускаем её таймер (созвон №5: тап = таймер). */
+  async function enterZone(cat: Category) {
     if (view !== 'map') return;
     setInsideId(cat.id);
     setDetailsOpen(false);
@@ -201,7 +237,10 @@ export function MapScreen({
     later(() => setView('inside'), DIVE_MS);
     if (!active || active.category_id !== cat.id) {
       try {
-        await startSession(cat.id);
+        // сессию ставим сразу из ответа: loadAll() тянет ещё пять запросов, и
+        // до его конца оверлей внутри зоны показывал бы «отдыхает» при живом
+        // таймере (а если параллельно доедет чужой loadAll — то и после)
+        setActive(await startSession(cat.id));
         setNowMs(Date.now());
         await loadAll();
       } catch (err) {
@@ -211,7 +250,7 @@ export function MapScreen({
   }
 
   /** Выныриваем обратно на карту (камера вернётся туда, откуда нырнули). */
-  function exitMine() {
+  function leaveZone() {
     if (view !== 'inside') return;
     setDetailsOpen(false);
     setView('rise');
@@ -221,7 +260,7 @@ export function MapScreen({
     }, RISE_MS);
   }
 
-  /** «Стоп» прямо под землёй: закрываем сессию и празднуем, не выходя наружу. */
+  /** «Стоп» прямо внутри зоны: закрываем сессию и празднуем, не выходя наружу. */
   async function handleStopInside() {
     if (busy) return;
     setBusy(true);
@@ -232,11 +271,14 @@ export function MapScreen({
         const totalsNow = await getCategoryTotals().catch(() => []);
         const totalNow =
           totalsNow.find((t) => t.category_id === closed.category_id)?.total_seconds ?? duration;
-        const before = getMineStage(Math.max(0, totalNow - duration));
-        const after = getMineStage(totalNow);
-        setMineParty({
+        const closedCat = categories.find((c) => c.id === closed.category_id);
+        const theme: InteriorTheme = closedCat && hasInterior(closedCat.theme) ? closedCat.theme : 'mine';
+        const before = getZoneLevel(Math.max(0, totalNow - duration));
+        const after = getZoneLevel(totalNow);
+        setParty({
           minutes: Math.max(1, Math.round(duration / 60)),
-          stageTitle: after.level > before.level ? after.title : null,
+          stageTitle: after.level > before.level ? INTERIOR_STAGES[theme][after.level].title : null,
+          text: INSIDE_TEXT[theme].party,
         });
       }
       await loadAll();
@@ -263,7 +305,7 @@ export function MapScreen({
   }
 
   /**
-   * Переключить задачу, не выходя из шахты. Отдельной ручки «сменить задачу у
+   * Переключить задачу, не выходя из зоны. Отдельной ручки «сменить задачу у
    * идущей сессии» в API нет, поэтому честно закрываем текущую и открываем
    * новую — общее время не теряется, дробится только запись.
    */
@@ -310,14 +352,16 @@ export function MapScreen({
   const lastCat = last ? categories.find((c) => c.id === last.category_id) : null;
   const openedCat = openedId ? categories.find((c) => c.id === openedId) ?? null : null;
 
-  /* ── что показываем под землёй ── */
+  /* ── что показываем внутри зоны ── */
   const immersed = view !== 'map';
   const insideCat = insideId ? categories.find((c) => c.id === insideId) ?? null : null;
   const insideSeconds = insideCat ? liveTotals.get(insideCat.id) ?? 0 : 0;
-  const insideLevel = demoLevel ?? getMineStage(insideSeconds).level;
-  const insideStageTitle = MINE_STAGES[insideLevel].title;
-  const nextStage = getNextMineStage(insideSeconds);
-  const stageProgress = getMineStageProgress(insideSeconds);
+  const insideTheme: InteriorTheme = insideCat && hasInterior(insideCat.theme) ? insideCat.theme : 'mine';
+  const insideText = INSIDE_TEXT[insideTheme];
+  const insideLevel = demoLevel ?? getZoneLevel(insideSeconds).level;
+  const insideStageTitle = INTERIOR_STAGES[insideTheme][insideLevel].title;
+  const nextStage = getNextInteriorStage(insideTheme, insideSeconds);
+  const stageProgress = getLevelProgress(insideSeconds);
   const hoursToNextStage = nextStage ? Math.max(1, Math.ceil(nextStage.minHours - insideSeconds / 3600)) : 0;
   const runningInside = !!active && !!insideCat && active.category_id === insideCat.id;
   const insideElapsed = runningInside && active ? elapsedSeconds(active.started_at, nowMs) : 0;
@@ -325,7 +369,7 @@ export function MapScreen({
 
   return (
     <>
-      {/* Полноэкранная 3D-сцена — карта или интерьер шахты */}
+      {/* Полноэкранная 3D-сцена — карта или интерьер зоны */}
       <div className="fixed inset-0 z-0">
         {categories.length > 0 && (
           <Suspense fallback={<LoadingBlock label="Загружаем 3D-мир…" />}>
@@ -336,8 +380,10 @@ export function MapScreen({
               onOpen={handleStation}
               levelOverride={demoLevel}
               view={view}
-              mineLevel={insideLevel}
-              mineActive={runningInside}
+              insideTheme={insideTheme}
+              insideId={insideId}
+              insideLevel={insideLevel}
+              insideActive={runningInside}
             />
           </Suspense>
         )}
@@ -424,8 +470,8 @@ export function MapScreen({
         </div>
       )}
 
-      {/* Демо: переключатель уровня шахты — щёлкай и смотри все стадии вживую */}
-      {IS_DEMO && !immersed && categories.some((c) => c.theme === 'mine') && (
+      {/* Демо: переключатель уровня 3D-зон (шахта, банк) — щёлкай и смотри стадии */}
+      {IS_DEMO && !immersed && categories.some((c) => c.theme === 'mine' || c.theme === 'bank') && (
         <div className="fixed left-2 top-1/2 z-30 -translate-y-1/2">
           <div className="glass-dark flex flex-col gap-1 p-1.5">
             <span className="px-1 pb-0.5 text-center text-[9px] font-semibold uppercase tracking-wide text-white/55">
@@ -460,11 +506,11 @@ export function MapScreen({
         </div>
       )}
 
-      {/* ───────── ВНУТРИ ШАХТЫ: тонкий стеклянный слой поверх 3D ───────── */}
+      {/* ───────── ВНУТРИ ЗОНЫ: тонкий стеклянный слой поверх 3D ───────── */}
       <AnimatePresence>
         {view === 'inside' && insideCat && (
           <motion.div
-            key="mine-ui"
+            key="inside-ui"
             className="pointer-events-none fixed inset-0 z-40 mx-auto max-w-[430px]"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -475,15 +521,15 @@ export function MapScreen({
             <motion.button
               type="button"
               whileTap={{ scale: 0.9 }}
-              onClick={exitMine}
-              aria-label="Выйти из шахты"
+              onClick={leaveZone}
+              aria-label={insideText.back}
               className="glass-dark pointer-events-auto absolute left-4 flex h-11 w-11 items-center justify-center !rounded-2xl text-white"
               style={{ top: 'calc(14px + env(safe-area-inset-top))' }}
             >
               <ArrowLeftIcon />
             </motion.button>
 
-            {/* название станции и стадия шахты */}
+            {/* название станции и стадия зоны */}
             <div
               className="glass-dark pointer-events-none absolute right-4 max-w-[60%] px-3.5 py-2 text-right"
               style={{ top: 'calc(14px + env(safe-area-inset-top))' }}
@@ -513,7 +559,7 @@ export function MapScreen({
               <div className="glass-dark flex items-center gap-3 px-4 py-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-[10px] uppercase tracking-wide text-white/50">
-                    {runningInside ? 'Идёт работа' : 'Шахта отдыхает'}
+                    {runningInside ? insideText.running : insideText.idle}
                   </p>
                   <p className="font-display text-2xl tabular-nums text-lime-300">
                     {formatClock(insideElapsed)}
@@ -539,7 +585,7 @@ export function MapScreen({
                     className="flex items-center gap-2 rounded-2xl bg-lime-300 px-5 py-3 font-display text-sm font-medium text-emerald-950 disabled:opacity-60"
                   >
                     <PlayIcon className="h-5 w-5" />
-                    Копать
+                    {insideText.start}
                   </motion.button>
                 )}
               </div>
@@ -561,7 +607,7 @@ export function MapScreen({
                   >
                     Авто
                   </button>
-                  {MINE_STAGES.map((st) => (
+                  {INTERIOR_STAGES[insideTheme].map((st) => (
                     <button
                       key={st.level}
                       type="button"
@@ -617,7 +663,7 @@ export function MapScreen({
                   <span className="text-white/55">
                     {nextStage
                       ? `до «${nextStage.title}» ещё ${formatHours(hoursToNextStage)}`
-                      : 'глубже некуда — Сердце горы'}
+                      : insideText.top}
                   </span>
                 </div>
                 <div className="h-2 overflow-hidden rounded-full bg-white/12">
@@ -684,15 +730,15 @@ export function MapScreen({
         )}
       </AnimatePresence>
 
-      {/* Празднование после «Стоп» под землёй */}
+      {/* Празднование после «Стоп» внутри зоны */}
       <AnimatePresence>
-        {mineParty && (
+        {party && (
           <motion.div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-6"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={() => setMineParty(null)}
+            onClick={() => setParty(null)}
           >
             <motion.div
               className="glass-dark w-full max-w-sm p-6 text-center"
@@ -706,22 +752,20 @@ export function MapScreen({
                 <SparkIcon className="h-7 w-7" />
               </span>
               <p className="mt-4 font-display text-3xl font-light text-lime-300">
-                +{mineParty.minutes} мин
+                +{party.minutes} мин
               </p>
-              <p className="mt-2 text-sm text-white/85">
-                Порода поддалась. Шахта стала глубже — так и строятся империи.
-              </p>
-              {mineParty.stageTitle && (
+              <p className="mt-2 text-sm text-white/85">{party.text}</p>
+              {party.stageTitle && (
                 <div className="mt-4 rounded-2xl bg-lime-300/15 p-3">
                   <p className="font-display text-sm text-lime-300">
-                    Новая стадия: {mineParty.stageTitle}
+                    Новая стадия: {party.stageTitle}
                   </p>
                 </div>
               )}
               <motion.button
                 type="button"
                 whileTap={{ scale: 0.95 }}
-                onClick={() => setMineParty(null)}
+                onClick={() => setParty(null)}
                 className="mt-5 w-full rounded-2xl bg-lime-300 py-3 font-display text-sm font-medium text-emerald-950"
               >
                 Отлично
