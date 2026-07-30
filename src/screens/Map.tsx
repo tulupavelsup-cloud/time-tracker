@@ -366,6 +366,9 @@ export function MapScreen({
   const runningInside = !!active && !!insideCat && active.category_id === insideCat.id;
   const insideElapsed = runningInside && active ? elapsedSeconds(active.started_at, nowMs) : 0;
   const insideTasks = insideCat ? tasks.filter((t) => t.category_id === insideCat.id) : [];
+  // подпись ручки: обещаем ровно то, что за ней есть (у станции без задач
+  // блок «Задача» не рисуется — незачем звать за задачами в пустоту)
+  const detailsHint = insideTasks.length > 0 ? 'Задачи и прогресс' : 'Прогресс и время';
 
   return (
     <>
@@ -550,12 +553,21 @@ export function MapScreen({
                 if (info.offset.y < -40) setDetailsOpen(true);
               }}
             >
+              {/* Ручка со ВНЯТНОЙ подписью: голая полоска не читалась как жест —
+                  спрашивали «а где выбор задачи», хотя он прямо за ней. */}
               <button
                 type="button"
                 onClick={() => setDetailsOpen(true)}
-                aria-label="Подробности станции"
-                className="mx-auto mb-2 block h-1.5 w-12 rounded-full bg-white/35"
-              />
+                className="mb-2 flex w-full flex-col items-center gap-1"
+              >
+                <span className="block h-1.5 w-12 rounded-full bg-white/35" />
+                {/* плашка, а не голый текст: интерьер банка светлый, белая
+                    подпись на нём терялась */}
+                <span className="glass-dark flex items-center gap-1 !rounded-full px-2.5 py-1 text-[11px] font-medium text-white/80">
+                  {detailsHint}
+                  <ArrowLeftIcon className="h-3 w-3 rotate-90" />
+                </span>
+              </button>
               <div className="glass-dark flex items-center gap-3 px-4 py-3">
                 <div className="min-w-0 flex-1">
                   <p className="text-[10px] uppercase tracking-wide text-white/50">
