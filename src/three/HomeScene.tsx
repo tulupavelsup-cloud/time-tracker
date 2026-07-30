@@ -15,18 +15,83 @@ import * as THREE from 'three';
 import type { Category } from '../api';
 import { formatDuration } from '../lib/format';
 import { categoryColor } from '../lib/palette';
-import { getZoneLevel, type InteriorTheme } from '../lib/thresholds';
+import { getZoneLevel, hasInterior, type InteriorTheme } from '../lib/thresholds';
 import { Terrain, GRASS_Y } from './Island';
 import { Bank3D } from './Bank3D';
 import { BankInterior } from './BankInterior';
+import { Corp3D } from './Corp3D';
+import { CorpInterior } from './CorpInterior';
 import { Mine3D } from './Mine3D';
 import { MineInterior } from './MineInterior';
+import { Oil3D } from './Oil3D';
+import { OilInterior } from './OilInterior';
+import { Space3D } from './Space3D';
+import { SpaceInterior } from './SpaceInterior';
 import { StationSign } from './Props3D';
 import { Character3D } from './Character3D';
 import { buildPath, stationLayout, WindingPath } from './Path';
 
 /** Что показываем: карту, нырок в зону, её интерьер или подъём наружу. */
 export type SceneView = 'map' | 'dive' | 'inside' | 'rise';
+
+/**
+ * Зоны с собственной 3D-моделью. У каждой свой масштаб на карте (у шахты приземистый
+ * холм, у космопорта — ракета в три её высоты), своя высота подписи и своя точка
+ * портала — места, куда ныряет камера на входе внутрь.
+ *
+ * labelY — высота таблички над станцией. У зон, которые растут вверх (корпорация,
+ * космопорт, нефтевышка), она поднимается вместе с уровнем: иначе на нулевом
+ * уровне табличка висит в небе, а на шестом оказывается на середине башни.
+ *
+ * portal — смещение точки нырка от центра станции: у шахты это очаг входа, у
+ * банка дверь на фасаде, у космопорта ворота ангара, у нефтевышки устье скважины.
+ */
+const ZONE_3D: Record<
+  InteriorTheme,
+  {
+    Model: (props: { level: number; active?: boolean }) => JSX.Element;
+    Interior: (props: { level: number; active: boolean }) => JSX.Element;
+    scale: number;
+    labelY: (level: number) => number;
+    portal: [number, number, number];
+  }
+> = {
+  mine: {
+    Model: Mine3D,
+    Interior: MineInterior,
+    scale: 0.72,
+    labelY: () => 2.4,
+    portal: [0, 0.58, 0.25],
+  },
+  bank: {
+    Model: Bank3D,
+    Interior: BankInterior,
+    scale: 0.8,
+    labelY: () => 2.3,
+    portal: [0, 0.52, 0.3],
+  },
+  corporation: {
+    Model: Corp3D,
+    Interior: CorpInterior,
+    scale: 0.66,
+    labelY: (lvl) => 1.5 + lvl * 0.38,
+    portal: [0, 0.44, 0.24],
+  },
+  spaceport: {
+    Model: Space3D,
+    Interior: SpaceInterior,
+    scale: 0.62,
+    labelY: (lvl) => 1.3 + lvl * 0.28,
+    portal: [-0.1, 0.36, 0.32],
+  },
+  oil: {
+    Model: Oil3D,
+    Interior: OilInterior,
+    scale: 0.64,
+    labelY: (lvl) => 1.3 + lvl * 0.34,
+    portal: [0.05, 0.42, 0.22],
+  },
+};
 
 const DEG = Math.PI / 180;
 /** Обзорный кадр: наклон, поворот и угол зрения камеры карты. */
@@ -63,8 +128,10 @@ function fitFrame(points: [number, number][]) {
     maxU = Math.max(maxU, Math.abs(dx * cosA - dz * sinA));
     maxV = Math.max(maxV, Math.abs(-dx * sinA - dz * cosA));
   }
-  // станция — точка, а модель с подписью занимают вокруг неё ещё пару юнитов
-  const halfW = maxU + 3;
+  // Станция — точка, а модель с подписью занимают вокруг неё ещё пару юнитов.
+  // Запас по ширине больше, чем по глубине: подпись рисуется постоянным
+  // размером в пикселях, и у крайней станции её обрезало правым краем экрана.
+  const halfW = maxU + 3.8;
   const halfD = maxV + 2.6;
   const aspect =
     typeof window === 'undefined' ? 0.5 : Math.max(0.4, window.innerWidth / window.innerHeight);
@@ -129,12 +196,11 @@ function Station({
   onOpen: (id: string) => void;
   levelOverride?: number | null;
 }) {
-  const isMine = cat.theme === 'mine';
-  const isBank = cat.theme === 'bank';
+  const zone = hasInterior(cat.theme) ? ZONE_3D[cat.theme] : null;
   // у зон с 3D-моделью уровень можно принудить (демо-переключатель)
-  const modelled = isMine || isBank;
-  const level = modelled && levelOverride != null ? levelOverride : getZoneLevel(seconds).level;
-  const scale = isMine ? 0.72 : isBank ? 0.8 : 0.9;
+  const level = zone && levelOverride != null ? levelOverride : getZoneLevel(seconds).level;
+  const scale = zone ? zone.scale : 0.9;
+  const labelY = zone ? zone.labelY(level) : 2.1;
   return (
     <group position={[pos[0], GRASS_Y, pos[1]]}>
       <group
@@ -151,13 +217,7 @@ function Station({
           document.body.style.cursor = 'auto';
         }}
       >
-        {isMine ? (
-          <Mine3D level={level} active={active} />
-        ) : isBank ? (
-          <Bank3D level={level} active={active} />
-        ) : (
-          <StationSign color={categoryColor(cat.color)} />
-        )}
+        {zone ? <zone.Model level={level} active={active} /> : <StationSign color={categoryColor(cat.color)} />}
         <mesh position={[0, 1, 0]} visible={false}>
           <cylinderGeometry args={[2, 2, 2.6, 12]} />
           <meshBasicMaterial />
@@ -167,7 +227,7 @@ function Station({
           камера далеко, и масштабируемая подпись становится нечитаемой — а по
           ней как раз и выбирают станцию. */}
       <Html
-        position={[0, isMine ? 2.4 : isBank ? 2.3 : 2.1, 0]}
+        position={[0, labelY, 0]}
         center
         zIndexRange={[10, 0]}
         style={{ pointerEvents: 'none' }}
@@ -326,14 +386,12 @@ function SceneContents({
   const activeIndex = placed.findIndex((c) => c.id === activeCategoryId);
   const restIndex = mineIndex >= 0 ? mineIndex : 0;
   const charSpot = placed.length ? posOf(activeIndex >= 0 ? activeIndex : restIndex) : ([0, 0] as [number, number]);
-  // Ныряем в ТУ станцию, по которой тапнули: у шахты портал — очаг входа, у
-  // банка — дверь на фасаде (она выше и ближе к зрителю).
+  // Ныряем в ТУ станцию, по которой тапнули, и целимся в её вход: у каждой зоны
+  // он свой (см. ZONE_3D) — очаг шахты, дверь банка, ворота ангара, устье скважины.
   const diveIndex = insideId ? placed.findIndex((c) => c.id === insideId) : -1;
   const diveSpot = placed.length ? posOf(diveIndex >= 0 ? diveIndex : restIndex) : ([0, 0] as [number, number]);
-  const portal: [number, number, number] =
-    insideTheme === 'bank'
-      ? [diveSpot[0], GRASS_Y + 0.52, diveSpot[1] + 0.3]
-      : [diveSpot[0], GRASS_Y + 0.58, diveSpot[1] + 0.25];
+  const [px, py, pz] = ZONE_3D[insideTheme].portal;
+  const portal: [number, number, number] = [diveSpot[0] + px, GRASS_Y + py, diveSpot[1] + pz];
 
   return (
     <>
@@ -433,7 +491,7 @@ export function HomeScene(props: HomeSceneProps) {
   const poseRef = useRef<SavedPose | null>(null);
   // мир карты живёт на карте и во время нырка, интерьер — внутри и на подъёме
   const showMap = view === 'map' || view === 'dive';
-  const Interior = insideTheme === 'bank' ? BankInterior : MineInterior;
+  const Interior = ZONE_3D[insideTheme].Interior;
 
   return (
     <Canvas

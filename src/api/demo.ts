@@ -63,6 +63,7 @@ const categories: Category[] = [
   cat('c-corp', 'Школа', '#3b82f6', 'corporation'),
   cat('c-space', 'Проекты', '#8b5cf6', 'spaceport'),
   cat('c-bank', 'Финансы', '#eab308', 'bank'),
+  cat('c-oil', 'Спорт', '#ef4444', 'oil'),
 ];
 
 const tasks: Task[] = [

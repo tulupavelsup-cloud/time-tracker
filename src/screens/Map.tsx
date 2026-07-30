@@ -83,6 +83,30 @@ const INSIDE_TEXT: Record<InteriorTheme, {
     party: 'Касса сошлась. Банк стал богаче — так и строятся империи.',
     top: 'богаче некуда — Сокровищница',
   },
+  corporation: {
+    back: 'Выйти из офиса',
+    idle: 'Офис спит',
+    running: 'Рабочий день',
+    start: 'Работать',
+    party: 'Задача закрыта. Компания выросла — так и строятся империи.',
+    top: 'выше некуда — Пентхаус',
+  },
+  spaceport: {
+    back: 'Выйти из цеха',
+    idle: 'Цех остыл',
+    running: 'Идёт сборка',
+    start: 'Собирать',
+    party: 'Ступень готова. Космопорт вырос — так и строятся империи.',
+    top: 'дальше только звёзды — Космоверфь',
+  },
+  oil: {
+    back: 'Выйти с промысла',
+    idle: 'Насосы стоят',
+    running: 'Смена идёт',
+    start: 'Качать',
+    party: 'Пласт поддался. Промысел вырос — так и строятся империи.',
+    top: 'глубже некуда — Нефтяное сердце',
+  },
 };
 
 function greeting(): string {
@@ -473,8 +497,10 @@ export function MapScreen({
         </div>
       )}
 
-      {/* Демо: переключатель уровня 3D-зон (шахта, банк) — щёлкай и смотри стадии */}
-      {IS_DEMO && !immersed && categories.some((c) => c.theme === 'mine' || c.theme === 'bank') && (
+      {/* Демо: переключатель уровня зон с 3D-моделью — щёлкай и смотри стадии */}
+      {IS_DEMO &&
+        !immersed &&
+        categories.some((c) => hasInterior(c.theme)) && (
         <div className="fixed left-2 top-1/2 z-30 -translate-y-1/2">
           <div className="glass-dark flex flex-col gap-1 p-1.5">
             <span className="px-1 pb-0.5 text-center text-[9px] font-semibold uppercase tracking-wide text-white/55">

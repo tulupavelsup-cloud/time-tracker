@@ -9,6 +9,11 @@
  * в служебный проём; в торце слева — сейф. Ближняя часть потолка срезана аркой:
  * туда мы «проваливаемся» с карты.
  *
+ * Оболочка заполняет кадр целиком на любом экране (см. interiorFrame.ts): пол и
+ * стены заходят за камеру и выше неё, а на широком экране зал раздаётся вширь и
+ * обрастает боковыми нефами за колоннадой — иначе он читался коробкой, стоящей
+ * посреди пустого фона.
+ *
  * Уровни — ТЕ ЖЕ, что снаружи (INTERIOR_STAGES.bank = ZONE_LEVELS, 0..6), всё
  * наращивается поверх предыдущего:
  *   0 Меняльный угол    — тесный угол: стол менялы, табурет, свеча, сундук
@@ -30,6 +35,8 @@ import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { MAX_LEVEL } from '../lib/thresholds';
 import { Character3D } from './Character3D';
+import { chain, Layer, type Placed } from './Instanced';
+import { SHELL_H, SHELL_NEAR, useSpread } from './interiorFrame';
 import { Chest, Coin, CoinStack, Guard, Ingot, IngotPile, MoneyBag, VaultDoor } from './Bank3D';
 import { Barrel, Crate } from './Mine3D';
 
@@ -49,9 +56,7 @@ const LEATHER = '#a4392f';
 
 /** Половина ширины зала на «Меняльном углу» и «Лавке»: внутренние грани стен. */
 const HALF_W = 1.95;
-/** Высота стен — с запасом, чтобы кладка закрывала верх кадра. */
-const WALL_H = 8;
-/** Ближний край пола: он уже за нижней кромкой кадра. */
+/** Ближний край «жилой» части зала: мебель ближе к камере не ставим. */
 const NEAR_Z = 1.6;
 /**
  * Ось ковровой дорожки (правая половина зала) — по ней ходит тележка. Не у самой
@@ -94,16 +99,21 @@ const grow = (level: number, from: number, to: number) => THREE.MathUtils.lerp(f
 
 /** Половина ширины зала: внутренние грани боковых стен. */
 const halfWFor = (level: number) => grow(level, HALF_W, 2.7);
-/** Торец: чем выше уровень, тем дальше вглубь уходит зал. */
-const backFor = (level: number) => (level <= 0 ? -4 : grow(level, -4.8, -9.3));
+/**
+ * Торец: чем выше уровень, тем дальше вглубь уходит зал. Уведён далеко (до −11):
+ * вблизи торец читался плоским задником в двух шагах за стойкой, а издали его
+ * смягчает воздушная дымка и заслоняет колоннада — получается глубина.
+ */
+const backFor = (level: number) => (level <= 0 ? -4.2 : grow(level, -5.6, -11));
 /**
  * Высота потолка и место, где он обрывается ближе к камере. Оба размера растут с
  * уровнем — это главный рычаг «зал стал больше»: верхнюю полосу кадра занимает
  * перекрытие над потолком, а его нижняя граница — луч из камеры по кромке среза.
- * Выше потолок и дальше срез → граница уползает вверх, и зала в кадре больше.
+ * Срез уведён вглубь: раньше он висел в трёх метрах перед камерой, и глухая
+ * стена над аркой съедала верхнюю треть кадра вместо самого зала.
  */
-const ceilFor = (level: number) => (level <= 0 ? 3.9 : grow(level, 4.1, 5.8));
-const ceilNearFor = (level: number) => grow(level, -2.9, -4.6);
+const ceilFor = (level: number) => (level <= 0 ? 3.9 : grow(level, 4.4, 6.4));
+const ceilNearFor = (level: number) => (level <= 0 ? -2.9 : grow(level, -4.4, -7));
 /** Толщина плиты потолка. */
 const CEIL_T = 0.7;
 /**
@@ -200,36 +210,56 @@ function paletteFor(level: number): Palette {
 
 /* ───────────────────────── оболочка зала ───────────────────────── */
 
+/** Размеры зала на текущем уровне и экране — считаются один раз в сцене. */
+interface Dims {
+  halfW: number;
+  back: number;
+  ceilY: number;
+  ceilNear: number;
+  /** во сколько раз зал шире базового: на широком экране он раздаётся вширь */
+  spread: number;
+}
+
 /**
  * Пол, стены с панелью и карнизом, потолок с балками и торец. Стены — сплошные
  * плиты с накладными филёнками: коробка нигде не просвечивает, а филёнки и
  * карнизы дают залу «интерьерный» силуэт вместо голого ящика.
+ *
+ * Плиты заходят ЗА камеру (SHELL_NEAR) и выше неё (SHELL_H): камера стоит
+ * ВНУТРИ зала, и на широком экране в края кадра попадают его ближние куски —
+ * раньше оболочка там просто кончалась, и в углах зияла заливка фона.
  */
-function HallShell({ level }: { level: number }) {
+function HallShell({ level, halfW, back, ceilY, ceilNear, spread }: Dims & { level: number }) {
   const pal = paletteFor(level);
-  const halfW = halfWFor(level);
-  const back = backFor(level);
-  const ceilY = ceilFor(level);
-  const ceilNear = ceilNearFor(level);
   const tiled = level >= 2;
+  /** Отделка доходит до ближней кромки оболочки только там, где её видно. */
+  const clad = spread > 1.05 ? SHELL_NEAR - 1.5 : NEAR_Z;
 
-  const floorLen = NEAR_Z - back + 2;
-  const floorMid = (NEAR_Z + back - 2) / 2;
-  const wallLen = NEAR_Z - back + 1.4;
-  const wallMid = (NEAR_Z + back - 1.4) / 2;
+  const floorLen = SHELL_NEAR - back + 2;
+  const floorMid = (SHELL_NEAR + back - 2) / 2;
+  const wallLen = SHELL_NEAR - back + 1.4;
+  const wallMid = (SHELL_NEAR + back - 1.4) / 2;
   const ceilLen = ceilNear - back + 1.2;
   const ceilMid = (ceilNear + back - 1.2) / 2;
   /** Высота нижней панели стен (вагонскот). */
   const PANEL_H = 1.15;
 
-  /** Филёнки по боковым стенам — ритм вглубь. */
+  /**
+   * Филёнки по боковым стенам — ритм вглубь. У ближней части зала потолка нет
+   * (туда мы проваливаемся), и на широком экране в края кадра попадает стена
+   * ВЫШЕ карниза: там идёт второй ярус филёнок, иначе по бокам кадра стояли бы
+   * две голые оштукатуренные плиты в полэкрана.
+   */
   const panels = useMemo(() => {
-    const out: { z: number; sign: number }[] = [];
+    const out: { z: number; sign: number; y: number; h: number }[] = [];
     for (const sign of [-1, 1]) {
-      for (let z = NEAR_Z - 1; z > back + 0.6; z -= 1.35) out.push({ z, sign });
+      for (let z = clad - 1; z > back + 0.6; z -= 1.35) {
+        out.push({ z, sign, y: PANEL_H + 0.9, h: 1.3 });
+        if (z > ceilNear + 1) out.push({ z, sign, y: ceilY + 1.15, h: 1.9 });
+      }
     }
     return out;
-  }, [back]);
+  }, [back, clad, ceilY, ceilNear]);
 
   /** Балки потолка: тот же ритм, что у филёнок. */
   const beams = useMemo(() => {
@@ -238,20 +268,24 @@ function HallShell({ level }: { level: number }) {
     return out;
   }, [ceilNear, back]);
 
-  /** Плитка пола (с уровня 2) — шахматная раскладка в два тона. */
+  /**
+   * Плитка пола (с уровня 2) — шахматная раскладка в два тона. Одним
+   * инстанс-слоем: в раздавшемся зале плиток под три сотни, и отдельными мешами
+   * это было бы столько же вызовов отрисовки на кадр.
+   */
   const tiles = useMemo(() => {
     if (!tiled) return [];
-    const out: { p: [number, number, number]; c: string }[] = [];
+    const out: Placed[] = [];
     const R = 0.72;
     let row = 0;
-    for (let z = NEAR_Z - R / 2; z > back + 0.3; z -= R, row++) {
+    for (let z = clad - R / 2; z > back + 0.3; z -= R, row++) {
       let col = 0;
       for (let x = -halfW + R / 2; x <= halfW - R / 2 + 0.01; x += R, col++) {
-        out.push({ p: [x, 0.03, z], c: (row + col) % 2 === 0 ? pal.tileA : pal.tileB });
+        out.push({ m: chain({ p: [x, 0.03, z] }), c: (row + col) % 2 === 0 ? pal.tileA : pal.tileB });
       }
     }
     return out;
-  }, [tiled, halfW, back, pal.tileA, pal.tileB]);
+  }, [tiled, halfW, back, clad, pal.tileA, pal.tileB]);
 
   /** Дощатый пол лавки. */
   const planks = useMemo(() => {
@@ -278,18 +312,16 @@ function HallShell({ level }: { level: number }) {
           <meshStandardMaterial color={rnd(x * 31) > 0.5 ? pal.tileA : pal.tileB} roughness={0.95} />
         </mesh>
       ))}
-      {tiles.map((t, i) => (
-        <mesh key={i} receiveShadow position={t.p}>
-          <boxGeometry args={[0.68, 0.05, 0.68]} />
-          <meshStandardMaterial color={t.c} roughness={level >= 4 ? 0.35 : 0.8} metalness={level >= 4 ? 0.1 : 0} />
-        </mesh>
-      ))}
+      <Layer items={tiles} receiveShadow>
+        <boxGeometry args={[0.68, 0.05, 0.68]} />
+        <meshStandardMaterial roughness={level >= 4 ? 0.35 : 0.8} metalness={level >= 4 ? 0.1 : 0} />
+      </Layer>
 
       {/* ── боковые стены: плита, панель понизу, рейка, карниз ── */}
       {[-1, 1].map((sign) => (
         <group key={sign}>
-          <mesh position={[sign * (halfW + 1), WALL_H / 2 - 0.4, wallMid]}>
-            <boxGeometry args={[2, WALL_H, wallLen]} />
+          <mesh position={[sign * (halfW + 1), SHELL_H / 2 - 0.4, wallMid]}>
+            <boxGeometry args={[2, SHELL_H, wallLen]} />
             <meshStandardMaterial color={pal.wall} roughness={0.95} />
           </mesh>
           <mesh receiveShadow position={[sign * (halfW - 0.06), PANEL_H / 2, wallMid]}>
@@ -313,21 +345,35 @@ function HallShell({ level }: { level: number }) {
       ))}
       {/* накладные филёнки на стенах */}
       {panels.map((p, i) => (
-        <group key={i} position={[p.sign * (halfW - 0.02), PANEL_H + 0.9, p.z]}>
+        <group key={i} position={[p.sign * (halfW - 0.02), p.y, p.z]}>
           <mesh>
-            <boxGeometry args={[0.04, 1.3, 0.95]} />
+            <boxGeometry args={[0.04, p.h, 0.95]} />
             <meshStandardMaterial color={pal.trim} roughness={0.85} />
           </mesh>
           <mesh position={[p.sign * 0.015, 0, 0]}>
-            <boxGeometry args={[0.04, 1.1, 0.78]} />
+            <boxGeometry args={[0.04, p.h - 0.2, 0.78]} />
             <meshStandardMaterial color={pal.wall} roughness={0.95} />
           </mesh>
         </group>
       ))}
+      {/* Пояс над карнизом в ближней части: граница между «залом» и стеной
+          второго яруса. Без него верх кадра на широком экране расплывался в
+          одно бесконечное поле штукатурки. */}
+      {clad > NEAR_Z &&
+        [-1, 1].map((sign) => (
+          <mesh key={sign} position={[sign * (halfW - 0.08), ceilY + 0.15, (clad + ceilNear) / 2]}>
+            <boxGeometry args={[0.19, 0.16, clad - ceilNear]} />
+            <meshStandardMaterial
+              color={pal.gilded ? GOLD_D : pal.trim}
+              roughness={pal.gilded ? 0.4 : 0.85}
+              metalness={pal.gilded ? 0.45 : 0}
+            />
+          </mesh>
+        ))}
 
       {/* ── торец ── */}
-      <mesh position={[0, WALL_H / 2 - 0.4, back - 1]}>
-        <boxGeometry args={[halfW * 2 + 4, WALL_H, 2]} />
+      <mesh position={[0, SHELL_H / 2 - 0.4, back - 1]}>
+        <boxGeometry args={[halfW * 2 + 4, SHELL_H, 2]} />
         <meshStandardMaterial color={pal.wall} roughness={0.95} />
       </mesh>
       <mesh receiveShadow position={[0, PANEL_H / 2, back + 0.06]}>
@@ -363,8 +409,8 @@ function HallShell({ level }: { level: number }) {
           {/* Стена над аркой — верхняя полоса кадра. Камера смотрит сверху, и
               верх кадра занимает именно она: тёмной плитой там зияла бы дыра,
               поэтому это обычная стена зала с пояском и медальоном. */}
-          <mesh position={[0, (ceilY + CEIL_T + WALL_H) / 2, ceilMid]}>
-            <boxGeometry args={[halfW * 2 + 0.4, WALL_H - ceilY - CEIL_T, ceilLen]} />
+          <mesh position={[0, (ceilY + CEIL_T + SHELL_H) / 2, ceilMid]}>
+            <boxGeometry args={[halfW * 2 + 0.4, SHELL_H - ceilY - CEIL_T, ceilLen]} />
             <meshStandardMaterial color={pal.wall} roughness={0.95} />
           </mesh>
           <mesh position={[0, ceilY + 0.42, ceilNear + 0.03]}>
@@ -465,6 +511,58 @@ function Pilasters({ level, halfW, back, ceilY }: { level: number; halfW: number
                 metalness={level >= 5 ? 0.55 : 0}
                 roughness={level >= 5 ? 0.35 : 0.85}
               />
+            </mesh>
+          </group>
+        )),
+      )}
+    </group>
+  );
+}
+
+/**
+ * Колоннада боковых нефов — появляется на широком экране. Зал раздаётся вширь,
+ * и между рабочей частью (стойка, дорожка) и стенами открывается пустая полоса
+ * пола; ряд колонн превращает её в боковой неф: кадр получает и глубину, и ритм,
+ * а зал перестаёт читаться коробкой с мебелью посередине.
+ */
+function Colonnade({ level, x, back, ceilY }: { level: number; x: number; back: number; ceilY: number }) {
+  const pal = paletteFor(level);
+  const zs = useMemo(() => {
+    const out: number[] = [];
+    for (let z = 1.2; z > back + 0.8; z -= 2.4) out.push(z);
+    return out;
+  }, [back]);
+  const h = ceilY - 0.5;
+  return (
+    <group>
+      {zs.map((z) =>
+        [-1, 1].map((sign) => (
+          <group key={`${z}:${sign}`} position={[sign * x, 0, z]}>
+            {/* база */}
+            <mesh castShadow receiveShadow position={[0, 0.11, 0]}>
+              <boxGeometry args={[0.62, 0.22, 0.62]} />
+              <meshStandardMaterial color={pal.panel} roughness={0.8} />
+            </mesh>
+            {/* ствол */}
+            <mesh castShadow receiveShadow position={[0, h / 2 + 0.22, 0]}>
+              <cylinderGeometry args={[0.2, 0.24, h, 12]} />
+              <meshStandardMaterial color={pal.trim} roughness={0.75} />
+            </mesh>
+            {/* капитель */}
+            <mesh castShadow position={[0, h + 0.28, 0]}>
+              <boxGeometry args={[0.56, 0.2, 0.56]} />
+              <meshStandardMaterial
+                color={level >= 5 ? GOLD : pal.trim}
+                emissive={level >= 5 ? GOLD_D : '#000000'}
+                emissiveIntensity={level >= 5 ? 0.2 : 0}
+                metalness={level >= 5 ? 0.5 : 0}
+                roughness={level >= 5 ? 0.35 : 0.8}
+              />
+            </mesh>
+            {/* архитрав до следующей колонны — ряд читается аркадой, а не частоколом */}
+            <mesh castShadow position={[0, h + 0.5, -1.2]}>
+              <boxGeometry args={[0.34, 0.32, 2.4]} />
+              <meshStandardMaterial color={pal.ceil} roughness={0.85} />
             </mesh>
           </group>
         )),
@@ -1179,6 +1277,57 @@ function Portrait({ position, sign = 1 }: { position: [number, number, number]; 
   );
 }
 
+/**
+ * Полукруглое окно высоко в торце (с уровня 2). Торец — единственная плоскость,
+ * которую видно целиком и в упор, и без него верх дальней стены оставался ровным
+ * полем штукатурки: зал упирался в задник вместо того, чтобы продолжаться. Свет
+ * из окна ещё и разбавляет тёплый лампадный свет зала дневным.
+ */
+function FarWindow({ level, back, ceilY }: { level: number; back: number; ceilY: number }) {
+  const pal = paletteFor(level);
+  // Высоту ищем между тем, что стоит у торца (сейф, служебный проём — до 2.7), и
+  // самим потолком: окно должно попадать в кадр целиком, вместе с полукружием.
+  const y = ceilY - 1.7;
+  const w = 0.95;
+  return (
+    <group position={[0.1, y, back + 0.14]}>
+      {/* стекло: прямоугольник и полукружие над ним */}
+      <mesh>
+        <planeGeometry args={[w * 2, 0.9]} />
+        <meshBasicMaterial color="#f3ead2" />
+      </mesh>
+      <mesh position={[0, 0.45, 0]}>
+        <circleGeometry args={[w, 22, 0, Math.PI]} />
+        <meshBasicMaterial color="#f7f0dc" />
+      </mesh>
+      {/* переплёт */}
+      {[-w / 2, 0, w / 2].map((x) => (
+        <mesh key={x} position={[x, 0.1, 0.02]}>
+          <boxGeometry args={[0.06, 1.55, 0.04]} />
+          <meshStandardMaterial color={pal.trim} roughness={0.8} />
+        </mesh>
+      ))}
+      <mesh position={[0, 0.02, 0.02]}>
+        <boxGeometry args={[w * 2, 0.06, 0.04]} />
+        <meshStandardMaterial color={pal.trim} roughness={0.8} />
+      </mesh>
+      {/* наличник */}
+      {[-1, 1].map((sx) => (
+        <mesh key={sx} position={[sx * (w + 0.09), 0.02, 0.04]}>
+          <boxGeometry args={[0.18, 1.05, 0.12]} />
+          <meshStandardMaterial color={pal.gilded ? GOLD_D : pal.trim} metalness={pal.gilded ? 0.45 : 0} roughness={0.6} />
+        </mesh>
+      ))}
+      <mesh position={[0, 0.45, 0.04]}>
+        <torusGeometry args={[w + 0.09, 0.09, 8, 24, Math.PI]} />
+        <meshStandardMaterial color={pal.gilded ? GOLD_D : pal.trim} metalness={pal.gilded ? 0.45 : 0} roughness={0.6} />
+      </mesh>
+      {/* дневной свет из окна — холоднее ламп зала */}
+      <pointLight position={[0, -0.2, 1.2]} color="#dfe8ff" intensity={1.3} distance={9} decay={2} />
+    </group>
+  );
+}
+
 /* ───────────────────────── хранилище в торце ───────────────────────── */
 
 /**
@@ -1733,18 +1882,33 @@ function InteriorCamera({ level }: { level: number }) {
 export function BankInterior({ level, active }: { level: number; active: boolean }) {
   const fx = useRef<{ toss: () => void } | null>(null);
   const s = Math.min(MAX_LEVEL, Math.max(0, Math.round(level)));
-  const halfW = halfWFor(s);
+  // На широком экране зал раздаётся вширь: кадр вдвое шире телефонного, и без
+  // этого камера смотрела бы мимо стен — в пустой фон по краям.
+  // На «Меняльном углу» и «Лавке» широкий экран раздвигает стены вполсилы:
+  // тесный угол менялы шириной в восемь метров перестаёт быть углом. Кадр всё
+  // равно заполнен — заполняет его сама оболочка, а не ширина зала.
+  const spread = 1 + (useSpread() - 1) * THREE.MathUtils.lerp(0.55, 1, growth(s));
+  const baseHalf = halfWFor(s);
+  const halfW = baseHalf * spread;
   const back = backFor(s);
   const ceilY = ceilFor(s);
   const deskTo = deskToFor(s);
   const top = s >= MAX_LEVEL;
+  /** Настенное (бра, часы, портрет, антресоль) — от самой стены. */
+  const wallL = (gap: number) => -halfW + gap;
+  const wallR = (gap: number) => halfW - gap;
   /**
-   * Мебель у стен отмеряется ОТ стены, а не от оси зала: с уровнями зал
-   * раздаётся вширь, и намертво прибитые координаты оставляли бы шкаф и скамью
-   * стоять посреди прохода.
+   * Рабочая зона зала. Мебель у стен отмеряется ОТ стены, а не от оси зала: с
+   * уровнями зал раздаётся вширь, и намертво прибитые координаты оставляли бы
+   * шкаф и скамью стоять посреди прохода. Но на широком экране зал ещё шире, и
+   * расползаться вслед за стенами мебели уже нельзя — за колоннадой начинаются
+   * боковые нефы, а работа идёт вокруг стойки и дорожки.
    */
-  const left = (gap: number) => -halfW + gap;
-  const right = (gap: number) => halfW - gap;
+  const workHalf = Math.min(halfW, baseHalf + 1.1);
+  const left = (gap: number) => -workHalf + gap;
+  const right = (gap: number) => workHalf - gap;
+  /** Колоннада нужна только там, где крылья зала реально видно. */
+  const aisles = spread > 1.15;
 
   return (
     <>
@@ -1753,14 +1917,16 @@ export function BankInterior({ level, active }: { level: number; active: boolean
 
       <InteriorCamera level={s} />
       <Lights level={s} back={back} halfW={halfW} active={active} />
-      <HallShell level={s} />
+      <HallShell level={s} halfW={halfW} back={back} ceilY={ceilY} ceilNear={ceilNearFor(s)} spread={spread} />
       {s >= 3 && <Pilasters level={s} halfW={halfW} back={back} ceilY={ceilY} />}
+      {/* боковые нефы широкого экрана: ряд колонн вдоль рабочей зоны */}
+      {aisles && <Colonnade level={s} x={workHalf + 0.5} back={back} ceilY={ceilY} />}
 
       {/* ── свет по стенам: чем больше зал, тем дальше вглубь горят бра ── */}
-      <Sconce position={[right(0.22), 2.15, -1.6]} sign={1} intensity={1.1} active={active} />
-      {s >= 2 && <Sconce position={[left(0.22), 2.25, -3.3]} sign={-1} intensity={0.95} active={active} />}
-      {s >= 3 && <Sconce position={[right(0.22), 2.3, -4.6]} sign={1} intensity={0.9} active={active} />}
-      {s >= 5 && <Sconce position={[left(0.22), 2.35, back + 1.4]} sign={-1} intensity={0.85} active={active} />}
+      <Sconce position={[wallR(0.22), 2.15, -1.6]} sign={1} intensity={1.1} active={active} />
+      {s >= 2 && <Sconce position={[wallL(0.22), 2.25, -3.3]} sign={-1} intensity={0.95} active={active} />}
+      {s >= 3 && <Sconce position={[wallR(0.22), 2.3, back * 0.5]} sign={1} intensity={0.9} active={active} />}
+      {s >= 5 && <Sconce position={[wallL(0.22), 2.35, back + 1.4]} sign={-1} intensity={0.85} active={active} />}
       {s >= 3 && <Chandelier y={ceilY - 0.62} z={back * 0.42} s={s >= 5 ? 1 : 0.85} active={active} />}
 
       {/* ── 0: угол менялы. Дальше — стойка кассы вдоль зала ── */}
@@ -1787,10 +1953,11 @@ export function BankInterior({ level, active }: { level: number; active: boolean
       {s >= 1 && <ShuttleCart active={active} park={CART_SPOT[2]} deep={back - 0.4} />}
       {s >= 1 && <Vault level={s} back={back} active={active} />}
 
-      {/* ── 2: дорожка, скамья для посетителей, часы на стене, припас у кассира ── */}
+      {/* ── 2: окно в торце, дорожка, скамья, часы на стене, припас у кассира ── */}
+      {s >= 2 && <FarWindow level={s} back={back} ceilY={ceilY} />}
       {s >= 2 && <Runner level={s} back={back} halfW={halfW} />}
       {s >= 2 && <Bench position={[right(0.55), 0, -1.9]} rot={-0.1} />}
-      {s >= 2 && <WallClock position={[right(0.16), 2.5, -0.4]} sign={1} active={active} />}
+      {s >= 2 && <WallClock position={[wallR(0.16), 2.5, -0.4]} sign={1} active={active} />}
       {/* ящик и мешок в ногах у кассира: за стойкой сторона служебная, и пустой
           угол у ближней кромки кадра нечем занять, кроме припаса */}
       {s >= 2 && <Crate position={[left(0.55), 0.3, -0.35]} s={0.6} rot={0.3} />}
@@ -1798,7 +1965,7 @@ export function BankInterior({ level, active }: { level: number; active: boolean
 
       {/* ── 3: шкаф с папками, портрет, очередь у окошка и первый посетитель ── */}
       {s >= 3 && <Cabinet position={[right(0.34), 0, -3.6]} rot={-Math.PI / 2} />}
-      {s >= 3 && <Portrait position={[left(0.16), 2.5, -0.5]} sign={-1} />}
+      {s >= 3 && <Portrait position={[wallL(0.16), 2.5, -0.5]} sign={-1} />}
       {s >= 3 && <Stanchions zs={[0.5, -0.55, -1.6]} />}
       {/* посетитель у окошка: фигурки Guard вчетверо мельче героя, поэтому
           их приходится увеличивать до человеческого роста */}
@@ -1824,7 +1991,7 @@ export function BankInterior({ level, active }: { level: number; active: boolean
       {s >= 5 && <Urn position={[right(0.42), 0, -0.55]} s={0.85} />}
 
       {/* ── 5: антресоль с пультом наблюдения и пневмопочта ── */}
-      {s >= 5 && <Mezzanine x={left(0.62)} z={back + 3.1} active={active} />}
+      {s >= 5 && <Mezzanine x={wallL(0.62)} z={back + 3.1} active={active} />}
       {s >= 5 && <TubeLine active={active} back={back} halfW={halfW} />}
 
       {/* ── 6: хранилище открыто, золото сияет, за стойкой работают клерки ── */}

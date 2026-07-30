@@ -68,7 +68,7 @@ export const MAX_LEVEL = ZONE_LEVELS[ZONE_LEVELS.length - 1].level;
    названия — у каждой темы свои (шахта копает вглубь, банк богатеет). */
 
 /** Темы зон, у которых есть свой интерьер: тап по такой станции = провал внутрь. */
-export type InteriorTheme = 'mine' | 'bank';
+export type InteriorTheme = 'mine' | 'bank' | 'corporation' | 'spaceport' | 'oil';
 
 export interface InteriorStage {
   /** Номер уровня, 0..6 — ровно как снаружи */
@@ -83,6 +83,9 @@ export interface InteriorStage {
 const INTERIOR_TITLES: Record<InteriorTheme, string[]> = {
   mine: ['Нора', 'Штрек', 'Первая жила', 'Крепь', 'Подъёмник', 'Кристальный зал', 'Сердце горы'],
   bank: ['Меняльный угол', 'Лавка менялы', 'Касса', 'Контора', 'Хранилище', 'Центр наблюдения', 'Сокровищница'],
+  corporation: ['Каморка', 'Кабинет', 'Опенспейс', 'Отдел', 'Штаб-квартира', 'Центр управления', 'Пентхаус'],
+  spaceport: ['Гараж', 'Мастерская', 'Сборочный цех', 'Ангар', 'Монтажный корпус', 'Центр полётов', 'Космоверфь'],
+  oil: ['Сарай', 'Дизельная', 'Насосная', 'Буровая', 'Операторская', 'Диспетчерская', 'Нефтяное сердце'],
 };
 
 const stagesOf = (theme: InteriorTheme): InteriorStage[] =>
@@ -95,11 +98,14 @@ const stagesOf = (theme: InteriorTheme): InteriorStage[] =>
 export const INTERIOR_STAGES: Record<InteriorTheme, InteriorStage[]> = {
   mine: stagesOf('mine'),
   bank: stagesOf('bank'),
+  corporation: stagesOf('corporation'),
+  spaceport: stagesOf('spaceport'),
+  oil: stagesOf('oil'),
 };
 
 /** Есть ли у темы свой интерьер (внутрь можно провалиться). */
 export function hasInterior(theme: string | null | undefined): theme is InteriorTheme {
-  return theme === 'mine' || theme === 'bank';
+  return !!theme && theme in INTERIOR_STAGES;
 }
 
 /** Текущий уровень интерьера по суммарным секундам категории. */

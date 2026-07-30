@@ -8,6 +8,10 @@
  * и справа — стены (x = ±HALF_W), над дальней частью — свод, в торце — забой.
  * Ближняя часть свода срезана: туда мы «проваливаемся» сверху.
  *
+ * Оболочка заполняет кадр целиком на любом экране (см. interiorFrame.ts): плиты
+ * пола и стен заходят за камеру и выше неё, а на широком экране штрек ещё и
+ * раздаётся вширь — иначе он читался коробкой посреди пустого фона.
+ *
  * Уровни — ТЕ ЖЕ, что снаружи (MINE_STAGES = ZONE_LEVELS, 0..6): раньше внутри
  * жила своя шкала на 10 стадий, и цифры снаружи/внутри не сходились. Всё
  * наращивается поверх предыдущего:
@@ -30,15 +34,15 @@ import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { MAX_LEVEL } from '../lib/thresholds';
 import { Character3D } from './Character3D';
-import { Barrel, Cart, Crate, Crystal, CrystalSpike, Rock, Sign, Timber } from './Mine3D';
+import { chain, Layer, type Placed } from './Instanced';
+import { SHELL_H, SHELL_NEAR, useSpread } from './interiorFrame';
+import { Barrel, Cart, Crate, Crystal, CrystalSpike, Sign, Timber } from './Mine3D';
 
 /* ───────────────────────── общая геометрия штрека ───────────────────────── */
 
 /** Половина ширины штрека на «Норе» и «Штреке»: внутренние грани боковых стен. */
 const HALF_W = 1.75;
-/** Высота стен и торца — с запасом, чтобы порода закрывала верх кадра. */
-const WALL_H = 8;
-/** Ближний край пола: он уже за нижней кромкой кадра. */
+/** Ближний край «жилой» части штрека: реквизит ближе к камере не ставим. */
 const NEAR_Z = 1.6;
 /**
  * Ось рельсов по x (правая половина штрека). Не у самой стены: по рельсам ходит
@@ -76,8 +80,12 @@ const grow = (level: number, from: number, to: number) => THREE.MathUtils.lerp(f
 
 /** Половина ширины зала: внутренние грани боковых стен. */
 const halfWFor = (level: number) => grow(level, HALF_W, 2.4);
-/** Глубина торца: чем выше уровень, тем дальше пробит штрек. */
-const backFor = (level: number) => (level <= 0 ? -4.2 : grow(level, -5, -9.3));
+/**
+ * Глубина торца: чем выше уровень, тем дальше пробит штрек. Забой уведён далеко
+ * (до −13): вблизи он читался плоским задником в двух шагах от героя, а издали
+ * его размывает туманом и заслоняют рамы крепи — получается глубина, а не стена.
+ */
+const backFor = (level: number) => (level <= 0 ? -4.4 : grow(level, -6.4, -11.5));
 /**
  * Высота свода и место, где он обрывается ближе к камере. Свод тонкий: камера
  * смотрит на него сверху, и толстая плита закрывала бы треть кадра глухим
@@ -85,11 +93,12 @@ const backFor = (level: number) => (level <= 0 ? -4.2 : grow(level, -5, -9.3));
  *
  * Оба размера растут с уровнем, и это главный рычаг «зал становится больше»:
  * верхнюю полосу кадра занимает порода над сводом, а её нижняя граница — луч из
- * камеры по кромке среза. Выше свод и дальше срез → граница уползает вверх, и
- * открытого зала в кадре становится всё больше (с 32% высоты кадра до ~12%).
+ * камеры по кромке среза. Срез уведён вглубь (раньше он висел в полутора метрах
+ * перед камерой и глухая порода съедала треть кадра): теперь в верхнюю полосу
+ * попадает сам штрек, уходящий к забою.
  */
-const ceilFor = (level: number) => (level <= 0 ? 3.6 : grow(level, 4, 5.4));
-const ceilNearFor = (level: number) => grow(level, -1.6, -3.8);
+const ceilFor = (level: number) => (level <= 0 ? 3.6 : grow(level, 4.3, 6.4));
+const ceilNearFor = (level: number) => (level <= 0 ? -1.6 : grow(level, -3.6, -7.2));
 /** Толщина плиты свода. */
 const CEIL_T = 0.7;
 /**
@@ -163,55 +172,72 @@ function paletteFor(level: number): Palette {
 
 /* ───────────────────────── оболочка штрека ───────────────────────── */
 
-interface Chunk {
-  p: [number, number, number];
-  s: [number, number, number];
-  r: [number, number, number];
-  c: string;
+/** Размеры выработки на текущем уровне и экране — считаются один раз в сцене. */
+interface Dims {
+  halfW: number;
+  back: number;
+  ceilY: number;
+  ceilNear: number;
+  /** во сколько раз штрек шире базового: на широком экране он раздаётся вширь */
+  spread: number;
 }
 
 /**
  * Стены, пол, свод и торец. Порода — гранёные глыбы поверх сплошных плит:
  * плиты гарантируют, что фон нигде не просвечивает, глыбы дают силуэт пещеры.
+ *
+ * Плиты заходят ЗА камеру (SHELL_NEAR) и выше неё (SHELL_H): камера стоит
+ * ВНУТРИ штрека, и на широком экране в края кадра попадают его ближние куски —
+ * раньше оболочка там просто кончалась, и в углах зияла заливка фона.
+ *
+ * Все глыбы рисуются одним инстанс-слоем: их несколько сотен, и отдельными
+ * мешами это было бы столько же вызовов отрисовки на кадр (и столько же в
+ * теневом проходе). Картинка та же — цена кадра другая.
  */
-function CaveShell({ level }: { level: number }) {
+function CaveShell({ level, halfW, back, ceilY, ceilNear, spread }: Dims & { level: number }) {
   const pal = paletteFor(level);
-  const halfW = halfWFor(level);
-  const back = backFor(level);
-  const ceilY = ceilFor(level);
-  const ceilNear = ceilNearFor(level);
+  /** Порода тянется до ближней кромки оболочки только там, где её видно. */
+  const clad = spread > 1.05 ? 6.5 : NEAR_Z;
 
   const chunks = useMemo(() => {
-    const out: Chunk[] = [];
+    const out: Placed[] = [];
     let i = 0;
     const push = (p: [number, number, number], base: number) => {
       const k = rnd(i++);
       const k2 = rnd(i++);
       out.push({
-        p,
-        s: [base * (0.85 + k * 0.5), base * (0.8 + k2 * 0.55), base * (0.85 + k * 0.45)],
-        r: [k * 1.4, k2 * 3.1, k * 0.9],
+        m: chain({
+          p,
+          r: [k * 1.4, k2 * 3.1, k * 0.9],
+          s: [base * (0.85 + k * 0.5), base * (0.8 + k2 * 0.55), base * (0.85 + k * 0.45)],
+        }),
         c: pal.wall[Math.floor(k * pal.wall.length) % pal.wall.length],
       });
     };
     // Ряды глыб по высоте: внизу мельче, наверху крупнее. Верхние ряды нужны
-    // даже там, где они выше свода: камера смотрит сверху и верхнюю треть кадра
+    // даже там, где они выше свода: камера смотрит сверху и верхнюю полосу кадра
     // занимает именно порода над штреком — без них там глухая темнота.
-    // Глыбы крупнее шага раскладки — иначе между ними видны щели и порода
-    // читается как россыпь отдельных камней, а не как массив.
+    // Глыбы вдвое крупнее шага раскладки и заметно перекрывают друг друга: с
+    // редким шагом между ними просвечивала плита стены, и порода читалась
+    // россыпью камней, наклеенных на плоский задник, а не сплошным массивом.
     const rows: [number, number][] = [
-      [0.15, 1],
-      [1.2, 1.15],
-      [2.4, 1.3],
-      [3.8, 1.5],
-      [5.4, 1.65],
-      [6.9, 1.8],
+      [0.15, 1.15],
+      [1.1, 1.3],
+      [2.2, 1.45],
+      [3.5, 1.6],
+      [4.9, 1.75],
+      [6.4, 1.9],
+      [8, 2.05],
+      [9.7, 2.2],
     ];
-    // боковые стены
+    // Боковые стены. Отступ глыбы от грани стены считается от её же размера:
+    // крупные ряды сидят глубже мелких, и порода выпирает внутрь штрека на
+    // одинаковые ~20 см. С общим отступом верхние ряды выпирали на полметра и
+    // съедали то, что висит на стенах, — фонарь тонул в скале целиком.
     for (const sign of [-1, 1]) {
-      for (let z = NEAR_Z; z >= back - 0.4; z -= 1.25) {
+      for (let z = clad; z >= back - 0.4; z -= 0.95) {
         for (const [y, base] of rows) {
-          push([sign * (halfW + 0.55 + rnd(i + 3) * 0.3), y + (rnd(i + 5) - 0.5) * 0.35, z + (rnd(i + 7) - 0.5) * 0.5], base);
+          push([sign * (halfW + base * 0.4 + rnd(i + 3) * 0.2), y + (rnd(i + 5) - 0.5) * 0.4, z + (rnd(i + 7) - 0.5) * 0.5], base);
         }
       }
     }
@@ -233,12 +259,29 @@ function CaveShell({ level }: { level: number }) {
     for (let x = -halfW + 0.2; x <= halfW - 0.2; x += 0.9) {
       push([x + (rnd(i + 31) - 0.5) * 0.4, ceilY - 0.15 + rnd(i + 37) * 0.25, ceilNear + 0.1], 1.15);
     }
+    // Наплывы породы со свода вдоль всего штрека: свод теперь виден далеко
+    // вглубь, и голая плита читалась бы натянутым потолком, а не горой.
+    for (let z = ceilNear - 1.6; z >= back + 0.6; z -= 2.1) {
+      for (const sx of [-1, 1]) {
+        push([sx * (halfW * (0.3 + rnd(i + 41) * 0.45)), ceilY - 0.35 - rnd(i + 43) * 0.3, z + (rnd(i + 47) - 0.5) * 0.8], 1.1);
+      }
+    }
+    // Валуны в боковых крыльях: на широком экране зал раздаётся, и вдоль стен
+    // остаётся пустая полоса пола — её и занимает осыпь от стен.
+    if (spread > 1.15) {
+      for (const sx of [-1, 1]) {
+        for (let z = 2.4; z >= back + 1; z -= 2.3) {
+          const off = 1.25 + rnd(i + 53) * (halfW - 2.4);
+          push([sx * Math.max(1.9, halfW - off), 0.35 + rnd(i + 59) * 0.4, z + (rnd(i + 61) - 0.5) * 1.1], 0.85 + rnd(i + 67) * 0.7);
+        }
+      }
+    }
     return out;
-  }, [pal, halfW, back, ceilY, ceilNear]);
+  }, [pal, halfW, back, ceilY, ceilNear, clad, spread]);
 
   const spikes = useMemo(
     () =>
-      Array.from({ length: 7 }, (_, k) => ({
+      Array.from({ length: 12 }, (_, k) => ({
         x: (k % 2 === 0 ? -1 : 1) * (halfW - 0.15 - rnd(k * 5 + 1) * 0.3),
         y: ceilY - 0.35,
         z: ceilNear - 0.4 - rnd(k * 5 + 2) * (ceilNear - back - 0.8),
@@ -248,24 +291,27 @@ function CaveShell({ level }: { level: number }) {
   );
 
   // обломков тем больше, чем крупнее зал — иначе пол большого зала пустеет
-  const rubble = useMemo(
-    () =>
-      Array.from({ length: Math.round(16 * (halfW / HALF_W)) }, (_, k) => ({
-        p: [-halfW + 0.25 + rnd(k + 40) * (halfW * 2 - 0.5), 0.06, back + 0.4 + rnd(k + 60) * (NEAR_Z - back - 0.8)] as [
-          number,
-          number,
-          number,
-        ],
-        s: 0.12 + rnd(k + 80) * 0.2,
-        r: [rnd(k) * 3, rnd(k + 1) * 3, rnd(k + 2) * 3] as [number, number, number],
-      })),
-    [halfW, back],
-  );
+  const rubble = useMemo(() => {
+    const out: Placed[] = [];
+    const n = Math.round(16 * (halfW / HALF_W));
+    for (let k = 0; k < n; k++) {
+      const s = 0.12 + rnd(k + 80) * 0.2;
+      out.push({
+        m: chain({
+          p: [-halfW + 0.25 + rnd(k + 40) * (halfW * 2 - 0.5), 0.06, back + 0.4 + rnd(k + 60) * (NEAR_Z - back - 0.8)],
+          r: [rnd(k) * 3, rnd(k + 1) * 3, rnd(k + 2) * 3],
+          s,
+        }),
+        c: pal.wall[1],
+      });
+    }
+    return out;
+  }, [halfW, back, pal]);
 
-  const floorLen = NEAR_Z - back + 2;
-  const floorMid = (NEAR_Z + back - 2) / 2;
-  const wallLen = NEAR_Z - back + 1.4;
-  const wallMid = (NEAR_Z + back - 1.4) / 2;
+  const floorLen = SHELL_NEAR - back + 2;
+  const floorMid = (SHELL_NEAR + back - 2) / 2;
+  const wallLen = SHELL_NEAR - back + 1.4;
+  const wallMid = (SHELL_NEAR + back - 1.4) / 2;
   const ceilLen = ceilNear - back + 1.2;
   const ceilMid = (ceilNear + back - 1.2) / 2;
 
@@ -281,13 +327,13 @@ function CaveShell({ level }: { level: number }) {
         <meshStandardMaterial color={pal.floorTop} roughness={1} />
       </mesh>
       {[-1, 1].map((sign) => (
-        <mesh key={sign} position={[sign * (halfW + 1), WALL_H / 2 - 0.4, wallMid]}>
-          <boxGeometry args={[2, WALL_H, wallLen]} />
+        <mesh key={sign} position={[sign * (halfW + 1), SHELL_H / 2 - 0.4, wallMid]}>
+          <boxGeometry args={[2, SHELL_H, wallLen]} />
           <meshStandardMaterial color={pal.wall[1]} roughness={1} />
         </mesh>
       ))}
-      <mesh position={[0, WALL_H / 2 - 0.4, back - 1]}>
-        <boxGeometry args={[halfW * 2 + 4, WALL_H, 2]} />
+      <mesh position={[0, SHELL_H / 2 - 0.4, back - 1]}>
+        <boxGeometry args={[halfW * 2 + 4, SHELL_H, 2]} />
         <meshStandardMaterial color={pal.wall[1]} roughness={1} />
       </mesh>
       {ceilLen > 0.5 && (
@@ -299,12 +345,10 @@ function CaveShell({ level }: { level: number }) {
 
       {/* Гранёная порода поверх плит. Детализация 1, а не 0: у крупных глыб
           20 граней читаются как гигантские кристаллы, а не как камень. */}
-      {chunks.map((c, k) => (
-        <mesh key={k} position={c.p} scale={c.s} rotation={c.r}>
-          <icosahedronGeometry args={[0.5, 1]} />
-          <meshStandardMaterial color={c.c} roughness={1} flatShading />
-        </mesh>
-      ))}
+      <Layer items={chunks}>
+        <icosahedronGeometry args={[0.5, 1]} />
+        <meshStandardMaterial roughness={1} flatShading />
+      </Layer>
 
       {/* каменные зубья со свода */}
       {spikes.map((s, k) => (
@@ -315,9 +359,10 @@ function CaveShell({ level }: { level: number }) {
       ))}
 
       {/* обломки на полу */}
-      {rubble.map((r, k) => (
-        <Rock key={k} position={r.p} scale={r.s} rot={r.r} color={pal.wall[1]} />
-      ))}
+      <Layer items={rubble} castShadow receiveShadow>
+        <icosahedronGeometry args={[0.5, 0]} />
+        <meshStandardMaterial roughness={1} flatShading />
+      </Layer>
 
       {/* каменная плитка пола (с уровня 4) */}
       {level >= 4 && <HexFloor color={pal.floorTop} halfW={halfW} back={back} />}
@@ -325,10 +370,13 @@ function CaveShell({ level }: { level: number }) {
   );
 }
 
-/** Шестиугольная плитка вдоль штрека — «обжитой» пол с 4-го уровня. */
+/**
+ * Шестиугольная плитка вдоль штрека — «обжитой» пол с 4-го уровня. Одним
+ * инстанс-слоем: в раздавшемся зале плиток под полторы сотни.
+ */
 function HexFloor({ color, halfW, back }: { color: string; halfW: number; back: number }) {
   const tiles = useMemo(() => {
-    const out: { p: [number, number, number]; c: string }[] = [];
+    const out: Placed[] = [];
     const R = 0.58;
     const stepX = R * 1.72;
     // рядами со смещением через один — шестиугольники ложатся в соты
@@ -337,20 +385,16 @@ function HexFloor({ color, halfW, back }: { color: string; halfW: number; back: 
       let q = 0;
       for (let x = -halfW + 0.35 + (r % 2 ? stepX / 2 : 0); x <= halfW - 0.35; x += stepX) {
         const k = rnd(q++ * 17 + r * 31);
-        out.push({ p: [x, 0.03, z], c: k > 0.66 ? '#4b5460' : k > 0.33 ? color : '#3d4650' });
+        out.push({ m: chain({ p: [x, 0.03, z], r: [0, Math.PI / 6, 0] }), c: k > 0.66 ? '#4b5460' : k > 0.33 ? color : '#3d4650' });
       }
     }
     return out;
   }, [color, halfW, back]);
   return (
-    <group>
-      {tiles.map((t, i) => (
-        <mesh key={i} receiveShadow position={t.p} rotation={[0, Math.PI / 6, 0]}>
-          <cylinderGeometry args={[0.56, 0.56, 0.06, 6]} />
-          <meshStandardMaterial color={t.c} roughness={1} flatShading />
-        </mesh>
-      ))}
-    </group>
+    <Layer items={tiles} receiveShadow>
+      <cylinderGeometry args={[0.56, 0.56, 0.06, 6]} />
+      <meshStandardMaterial roughness={1} flatShading />
+    </Layer>
   );
 }
 
@@ -1084,7 +1128,14 @@ function InteriorCamera({ level }: { level: number }) {
 export function MineInterior({ level, active }: { level: number; active: boolean }) {
   const fx = useRef<{ hit: () => void; toss: () => void } | null>(null);
   const s = Math.min(MAX_LEVEL, Math.max(0, Math.round(level)));
-  const halfW = halfWFor(s);
+  // На широком экране штрек раздаётся вширь: кадр вдвое шире телефонного, и без
+  // этого камера смотрела бы мимо стен — в пустой фон по краям.
+  // На «Норе» и «Штреке» широкий экран раздвигает стены вполсилы: тесная нора
+  // шириной в семь метров перестаёт быть норой. Кадр всё равно заполнен —
+  // заполняет его сама оболочка, а не ширина зала.
+  const spread = 1 + (useSpread() - 1) * THREE.MathUtils.lerp(0.55, 1, growth(s));
+  const baseHalf = halfWFor(s);
+  const halfW = baseHalf * spread;
   const back = backFor(s);
   const railTo = back + 0.3;
   const top = s >= MAX_LEVEL;
@@ -1093,14 +1144,25 @@ export function MineInterior({ level, active }: { level: number; active: boolean
    * раздаётся вширь, и намертво прибитые координаты оставляли бы ящики и
    * лебёдку висеть посреди прохода. Аргумент — зазор от внутренней грани стены.
    */
-  const left = (gap: number) => -halfW + gap;
-  const right = (gap: number) => halfW - gap;
+  const wallL = (gap: number) => -halfW + gap;
+  const wallR = (gap: number) => halfW - gap;
+  /**
+   * Рабочая зона штрека. На широком экране зал раздаётся вширь, но верстак,
+   * бочка и лебёдка не должны расползаться вслед за стенами: работа идёт вокруг
+   * рельсов и героя, а крылья зала — это уже просто выработанная порода.
+   */
+  const workHalf = Math.min(halfW, baseHalf + 1.1);
+  const left = (gap: number) => -workHalf + gap;
+  const right = (gap: number) => workHalf - gap;
   // Кристаллы по стенам: нижние стоят на полу, верхние «растут» из стены.
+  // Дальние привязаны к забою — иначе в глубине штрека не на что смотреть.
   const spikes: [number, number, number][] = [
-    [right(0.15), 0, -3.4],
-    [left(0.13), 1.55, -2.5],
-    [right(0.15), 0, -5.9],
-    [right(0.13), 1.7, -4.3],
+    [wallR(0.15), 0, -3.4],
+    [wallL(0.13), 1.55, -2.5],
+    [wallR(0.15), 0, back * 0.62],
+    [wallR(0.13), 1.7, back * 0.44],
+    [wallL(0.15), 0, back * 0.8],
+    [wallL(0.13), 1.6, back * 0.68],
   ];
 
   return (
@@ -1110,16 +1172,27 @@ export function MineInterior({ level, active }: { level: number; active: boolean
 
       <InteriorCamera level={s} />
       <Lights level={s} back={back} halfW={halfW} />
-      <CaveShell level={s} />
-      <Vein level={s} halfW={halfW} />
+      <CaveShell
+        level={s}
+        halfW={halfW}
+        back={back}
+        ceilY={ceilFor(s)}
+        ceilNear={ceilNearFor(s)}
+        spread={spread}
+      />
+      {/* Жила тянется от стены САМОГО штрека: на широком экране до боковой
+          стены зала метры, и выступ вырастал в глыбу во весь бок кадра. */}
+      <Vein level={s} halfW={Math.min(halfW, baseHalf + 0.5)} />
 
       {/* Фонари на стенах: чем крупнее шахта, тем дальше вглубь они висят.
           Зазор от стены больше полуметра — глыбы породы выпирают внутрь штрека
           сантиметров на тридцать, и фонарь, повешенный впритык, тонул в скале. */}
-      <Lantern position={[right(0.75), 2.4, -2]} intensity={1.2} />
-      {s >= 2 && <Lantern position={[left(0.55), 2.4, -3.9]} intensity={1} />}
-      {s >= 4 && <Lantern position={[right(0.55), 2.5, -5.6]} intensity={0.95} />}
-      {s >= 5 && <Lantern position={[left(0.5), 2.5, back + 1.1]} intensity={0.9} />}
+      <Lantern position={[wallR(0.75), 2.4, -2]} intensity={1.2} />
+      {s >= 2 && <Lantern position={[wallL(0.55), 2.4, -3.9]} intensity={1} />}
+      {s >= 4 && <Lantern position={[wallR(0.55), 2.5, back * 0.55]} intensity={0.95} />}
+      {/* Фонарь у самого забоя — с 3-го уровня: без него глубина штрека уходила
+          в ровную темноту и читалась не пространством, а глухим задником. */}
+      {s >= 3 && <Lantern position={[wallL(0.5), 2.5, back + 1.1]} intensity={0.9} />}
 
       {/* 1 — рельсы, устье тоннеля в торце и вагонетка-челнок */}
       {s >= 1 && <Rails from={NEAR_Z} to={railTo} />}
@@ -1137,15 +1210,18 @@ export function MineInterior({ level, active }: { level: number; active: boolean
           тянется от стены до стены, поэтому ширина считается из halfW.
           Дальние рамы ниже ближних: верхушку высокой рамы срезает свод, и от
           неё в кадре остаются одни стойки — ритм штрека при этом пропадает. */}
+      {/* Пролёт рамы — по ширине САМОГО штрека, а не всего зала: на широком
+          экране зал раздаётся вширь, и рама от стены до стены превращалась в
+          ворота во весь кадр. Крепят проход, а не крылья выработки. */}
       {s >= 2 &&
-        timberZs(back).map((z, i) => <TimberSet key={z} z={z} w={halfW * 2 - 0.35} h={2.85 - i * 0.2} />)}
+        timberZs(back).map((z, i) => <TimberSet key={z} z={z} w={baseHalf * 2 - 0.35} h={2.85 - i * 0.2} />)}
       {/* лебёдка работает до 5-го уровня: там её место занимает балкон яруса.
           Стоит ПЕРЕД первой рамой — на её месте стойка проходила бы насквозь */}
       {s >= 2 && s <= 4 && <Hoist active={active} x={left(0.5)} z={-2.5} />}
       {s >= 2 &&
         spikes
-          .slice(0, s >= 5 ? 4 : s >= 4 ? 3 : s >= 3 ? 2 : 1)
-          .map((p, i) => <CrystalSpike key={i} position={p} s={1 + i * 0.25} gold={top && i === 0} />)}
+          .slice(0, s >= 5 ? 6 : s >= 4 ? 5 : s >= 3 ? 4 : 2)
+          .map((p, i) => <CrystalSpike key={i} position={p} s={1 + (i % 3) * 0.25} gold={top && i === 0} />)}
 
       {/* 3 — конвейер в пролёте между рамами, ящики и табличка */}
       {s >= 3 && !top && <Conveyor active={active} x={left(1.4)} z={-4.2} />}
@@ -1167,7 +1243,7 @@ export function MineInterior({ level, active }: { level: number; active: boolean
       {s >= 4 && <Workbench position={[left(0.95), 0, -5.25]} rot={0.22} crystals={Math.min(4, s)} />}
 
       {/* 5 — балкон второго яруса на месте лебёдки, трубы и приборы по торцу */}
-      {s >= 5 && <UpperLedge level={s} x={left(1)} z={-4} />}
+      {s >= 5 && <UpperLedge level={s} x={wallL(1)} z={-4} />}
       {s >= 5 && <Pipes active={active} back={back} halfW={halfW} />}
 
       {/* 6 — плавильня, артель и сердце горы в глубине зала. Глубину подобрали
@@ -1176,9 +1252,11 @@ export function MineInterior({ level, active }: { level: number; active: boolean
           утоплена в породу — читается как печь в нише), сердце горы сдвинуто
           правее: постамент у него в два метра, и вдвоём у левой стены они
           вставали друг в друга. */}
-      {top && <Furnace active={active} x={left(0.5)} z={-6.9} />}
-      {top && <Artel active={active} halfW={halfW} />}
-      {top && <Heart x={-0.7} z={back + 1.15} s={0.55} />}
+      {top && <Furnace active={active} x={wallL(0.5)} z={-6.9} />}
+      {top && <Artel active={active} halfW={workHalf} />}
+      {/* Сердце горы крупнее прежнего: забой уведён вглубь, и на прежнем
+          масштабе главная награда шахты терялась в перспективе. */}
+      {top && <Heart x={-0.7} z={back + 1.6} s={0.72} />}
 
       {/* герой: долбит жилу, вытирает лоб, кидает руду в вагонетку */}
       <group position={HERO} rotation={[0, HERO_YAW, 0]}>
