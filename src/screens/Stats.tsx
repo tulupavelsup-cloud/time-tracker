@@ -274,15 +274,17 @@ export function StatsScreen() {
         </div>
       )}
 
-      {/* Журнал ручных правок: видно, где откат сработал, а где нет */}
-      {edits.length > 0 && (
-        <div className="glass-dark p-4">
-          <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-white/50">
-            Правки времени
-          </h2>
-          <p className="mb-3 text-xs text-white/45">
-            Что поправили руками и за какой день. Можно вернуть как было.
-          </p>
+      {/* Журнал ручных правок: видно, где откат сработал, а где нет.
+          Карточка стоит всегда — пустую тоже видно, иначе журнал ищут и не
+          находят («а где он?»), пока не сделана первая правка. */}
+      <div className="glass-dark p-4">
+        <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-white/50">
+          Правки времени
+        </h2>
+        <p className="mb-3 text-xs text-white/45">
+          Что поправили руками и за какой день. Можно вернуть как было.
+        </p>
+        {edits.length > 0 ? (
           <TimeEditsList
             edits={edits}
             subjectOf={(e) => {
@@ -293,8 +295,13 @@ export function StatsScreen() {
             onUndo={(e) => void handleUndo(e)}
             busy={undoing}
           />
-        </div>
-      )}
+        ) : (
+          <p className="rounded-2xl bg-white/6 p-3 text-[12px] text-white/55">
+            Пока ничего не правили. Как только добавите или откатите время, здесь появится
+            запись: сколько, за какой день и что было до правки.
+          </p>
+        )}
+      </div>
 
       {/* Прогресс станций на карте: всё время против порогов */}
       {categories.length > 0 && (

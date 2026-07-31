@@ -23,4 +23,12 @@
   .scene-pill {
     @apply rounded-full bg-white px-2.5 py-1 text-[11px] font-semibold text-gray-900 shadow-md;
   }
+  /* Барабан выбора времени: полоса прокрутки только мешает */
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
 }

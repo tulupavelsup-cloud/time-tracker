@@ -16,7 +16,7 @@
  * Сама механика (не наслаивать время, резать по выбранному дню) — в api/adjust.ts.
  */
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -43,10 +43,14 @@ type Mode = 'add' | 'cut';
 /** Быстрые размеры правки, минуты. */
 const PRESETS = [15, 30, 60, 120, 240, 480];
 
-const MAX_MINUTES = 24 * 60;
-/** Автоповтор при удержании ±: пауза перед разгоном и период повтора, мс. */
-const HOLD_DELAY = 420;
-const HOLD_PERIOD = 90;
+/** Барабан как в будильнике: высота строки и сколько строк видно. */
+const ITEM_H = 40;
+const VISIBLE = 5;
+const WHEEL_H = ITEM_H * VISIBLE;
+/** Отступ сверху/снизу, чтобы крайние числа доезжали до середины. */
+const WHEEL_PAD = (WHEEL_H - ITEM_H) / 2;
+/** Прокрутка считается законченной, если событий нет столько мс. */
+const SETTLE_MS = 140;
 
 interface TimeAdjustProps {
   category: Category;
@@ -58,126 +62,124 @@ interface TimeAdjustProps {
   onChanged: () => void | Promise<void>;
 }
 
-const clampMinutes = (v: number) => Math.min(MAX_MINUTES, Math.max(0, Math.round(v)));
-
 /**
- * Кнопка шага ±: шаг по тапу, дальше разгон, пока держат палец.
- * У часов шаг час, у минут — пять минут: набирать «7 часов» минутами невозможно.
+ * Барабан выбора числа — как в будильнике айфона: крутишь пальцем, нужное
+ * число останавливается в подсвеченной полосе. Кнопками ± час набирался
+ * десятками тапов, поэтому от них отказались совсем.
+ *
+ * Значение — это и есть номер строки, поэтому подсветка соседей считается
+ * прямо от него, без второго состояния: пока палец ведёт барабан, значение
+ * уже меняется, и предпросмотр «станет столько-то» едет вместе с ним.
  */
-function StepButton({
-  onStep,
-  disabled,
-  ariaLabel,
-  children,
-}: {
-  onStep: () => void;
-  disabled: boolean;
-  ariaLabel: string;
-  children: ReactNode;
-}) {
-  const timers = useRef<number[]>([]);
-
-  const stop = useCallback(() => {
-    for (const id of timers.current) {
-      window.clearTimeout(id);
-      window.clearInterval(id);
-    }
-    timers.current = [];
-  }, []);
-
-  useEffect(() => stop, [stop]);
-
-  return (
-    <motion.button
-      type="button"
-      whileTap={{ scale: 0.9 }}
-      aria-label={ariaLabel}
-      disabled={disabled}
-      onPointerDown={() => {
-        if (disabled) return;
-        onStep();
-        timers.current.push(
-          window.setTimeout(() => {
-            timers.current.push(window.setInterval(onStep, HOLD_PERIOD));
-          }, HOLD_DELAY),
-        );
-      }}
-      onPointerUp={stop}
-      onPointerLeave={stop}
-      onPointerCancel={stop}
-      // с клавиатуры pointer-событий нет — у такого click detail === 0
-      onClick={(e) => {
-        if (e.detail === 0 && !disabled) onStep();
-      }}
-      className="glass-dark h-10 w-10 shrink-0 !rounded-2xl font-display text-xl leading-none text-white disabled:opacity-40"
-    >
-      {children}
-    </motion.button>
-  );
-}
-
-/**
- * Поле числа: можно ввести с клавиатуры («7») и подкрутить кнопками.
- * Пока в поле печатают, показываем ровно набранное — иначе «7» превратится
- * в «07» под пальцем и стирать станет нечего.
- */
-function NumberField({
+function Wheel({
+  count,
   value,
-  draft,
-  onDraft,
-  onValue,
-  onStep,
-  step,
-  max,
+  onChange,
+  unit,
   label,
   name,
-  disableMinus,
 }: {
+  /** Сколько чисел: 24 у часов, 60 у минут */
+  count: number;
   value: number;
-  draft: string | null;
-  onDraft: (text: string | null) => void;
-  onValue: (v: number) => void;
-  onStep: (delta: number) => void;
-  step: number;
-  max: number;
+  onChange: (v: number) => void;
+  /** Подпись у выбранного числа: «ч» или «мин» */
+  unit: string;
   label: string;
   name: string;
-  /** Убавлять нечего: общий размер правки уже меньше шага */
-  disableMinus: boolean;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  /** Пока палец крутит барабан, доводить его снаружи нельзя — дёргается. */
+  const scrolling = useRef(false);
+  const settle = useRef<number | undefined>(undefined);
+
+  // Открылись — сразу стоим на нужном числе, без прокрутки на глазах
+  useEffect(() => {
+    const el = ref.current;
+    if (el) el.scrollTop = value * ITEM_H;
+    // только при появлении: дальше барабаном рулит пользователь
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Значение сменили снаружи (пресет, клавиатура) — доводим барабан плавно
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || scrolling.current) return;
+    const target = value * ITEM_H;
+    if (Math.abs(el.scrollTop - target) > 1) el.scrollTo({ top: target, behavior: 'smooth' });
+  }, [value]);
+
+  useEffect(() => () => window.clearTimeout(settle.current), []);
+
+  function handleScroll() {
+    const el = ref.current;
+    if (!el) return;
+    scrolling.current = true;
+    window.clearTimeout(settle.current);
+    settle.current = window.setTimeout(() => {
+      scrolling.current = false;
+    }, SETTLE_MS);
+
+    const i = Math.max(0, Math.min(count - 1, Math.round(el.scrollTop / ITEM_H)));
+    if (i !== value) onChange(i);
+  }
+
   return (
-    <div className="min-w-0 flex-1">
-      <div className="flex items-center gap-1.5">
-        <StepButton
-          ariaLabel={`${label}: минус`}
-          disabled={disableMinus}
-          onStep={() => onStep(-step)}
-        >
-          −
-        </StepButton>
-        <input
-          type="text"
-          inputMode="numeric"
-          aria-label={label}
-          value={draft ?? String(value)}
-          onFocus={(e) => {
-            onDraft(String(value));
-            e.currentTarget.select();
-          }}
-          onBlur={() => onDraft(null)}
-          onChange={(e) => {
-            const raw = e.target.value.replace(/\D/g, '').slice(0, 4);
-            onDraft(raw);
-            onValue(Math.min(max, raw === '' ? 0 : Number(raw)));
-          }}
-          className="w-full min-w-0 flex-1 rounded-2xl bg-white/10 px-1 py-2 text-center font-display text-xl tabular-nums text-white outline-none focus:bg-white/16"
-          name={name}
-        />
-        <StepButton ariaLabel={`${label}: плюс`} disabled={false} onStep={() => onStep(step)}>
-          +
-        </StepButton>
+    <div className="relative min-w-0 flex-1">
+      <div
+        ref={ref}
+        role="listbox"
+        aria-label={label}
+        aria-activedescendant={`${name}-${value}`}
+        tabIndex={0}
+        data-wheel={name}
+        onScroll={handleScroll}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            const next = value + (e.key === 'ArrowDown' ? 1 : -1);
+            if (next >= 0 && next < count) onChange(next);
+          }
+        }}
+        className="no-scrollbar h-full snap-y snap-mandatory overflow-y-auto outline-none"
+        style={{
+          // края тают — видно, что список продолжается
+          maskImage: 'linear-gradient(to bottom, transparent, #000 26%, #000 74%, transparent)',
+          WebkitMaskImage: 'linear-gradient(to bottom, transparent, #000 26%, #000 74%, transparent)',
+          overscrollBehavior: 'contain',
+          paddingTop: WHEEL_PAD,
+          paddingBottom: WHEEL_PAD,
+        }}
+      >
+        {Array.from({ length: count }, (_, i) => {
+          const away = Math.abs(i - value);
+          return (
+            <div
+              key={i}
+              id={`${name}-${i}`}
+              role="option"
+              aria-selected={i === value}
+              onClick={() => onChange(i)}
+              className={`flex snap-center items-center justify-center font-display tabular-nums transition-colors ${
+                away === 0
+                  ? 'text-[26px] text-white'
+                  : away === 1
+                    ? 'text-[22px] text-white/45'
+                    : 'text-[20px] text-white/20'
+              }`}
+              style={{ height: ITEM_H }}
+            >
+              {i}
+            </div>
+          );
+        })}
       </div>
-      <p className="mt-1 text-center text-[11px] uppercase tracking-wide text-white/40">{label}</p>
+      {/* подпись держится у выбранного числа и не едет вместе с барабаном */}
+      <span className="pointer-events-none absolute top-1/2 -translate-y-1/2 text-[13px] text-white/55"
+        style={{ left: 'calc(50% + 26px)' }}
+      >
+        {unit}
+      </span>
     </div>
   );
 }
@@ -192,7 +194,6 @@ function TimeAdjustSheet({
   const { toast } = useToast();
   const [mode, setMode] = useState<Mode>('add');
   const [minutes, setMinutes] = useState(30);
-  const [draft, setDraft] = useState<{ field: 'h' | 'm'; text: string } | null>(null);
   /** null — «за всё время» (только для отката) */
   const [day, setDay] = useState<string | null>(() => dayKey());
   const [pickingDate, setPickingDate] = useState(false);
@@ -251,9 +252,9 @@ function TimeAdjustSheet({
     void reloadEdits();
   }, [reloadEdits]);
 
+  /** Пресет ставит оба барабана разом — они доедут сами. */
   function setTotal(total: number) {
-    setMinutes(clampMinutes(total));
-    setDraft(null);
+    setMinutes(Math.max(0, Math.min(23 * 60 + 59, Math.round(total))));
   }
 
   async function apply() {
@@ -448,33 +449,30 @@ function TimeAdjustSheet({
           )}
         </div>
 
-        {/* Сколько: часы и минуты отдельно, можно вписать руками */}
+        {/* Сколько: два барабана, как в будильнике */}
         <div>
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/50">Сколько</p>
-          <div className="flex items-start gap-2">
-            <NumberField
-              label="часов"
-              name="adjust-hours"
-              value={hours}
-              max={24}
-              step={1}
-              disableMinus={minutes < 60}
-              draft={draft?.field === 'h' ? draft.text : null}
-              onDraft={(text) => setDraft(text === null ? null : { field: 'h', text })}
-              onValue={(h) => setMinutes(clampMinutes(h * 60 + mins))}
-              onStep={(d) => setTotal(minutes + d * 60)}
+          <div className="relative flex" style={{ height: WHEEL_H }}>
+            {/* полоса выбора — число останавливается ровно в ней */}
+            <div
+              className="pointer-events-none absolute inset-x-0 top-1/2 -translate-y-1/2 rounded-2xl bg-white/10"
+              style={{ height: ITEM_H }}
             />
-            <NumberField
-              label="минут"
+            <Wheel
+              name="adjust-hours"
+              label="часы"
+              unit="ч"
+              count={24}
+              value={hours}
+              onChange={(h) => setMinutes(h * 60 + mins)}
+            />
+            <Wheel
               name="adjust-minutes"
+              label="минуты"
+              unit="мин"
+              count={60}
               value={mins}
-              max={59}
-              step={5}
-              disableMinus={minutes <= 0}
-              draft={draft?.field === 'm' ? draft.text : null}
-              onDraft={(text) => setDraft(text === null ? null : { field: 'm', text })}
-              onValue={(m) => setMinutes(clampMinutes(hours * 60 + m))}
-              onStep={(d) => setTotal(minutes + d)}
+              onChange={(m) => setMinutes(hours * 60 + m)}
             />
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
