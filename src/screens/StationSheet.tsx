@@ -39,6 +39,8 @@ interface StationSheetProps {
   tasks: Task[];
   /** Накопленные секунды категории — для стадии станции */
   totalSeconds: number;
+  /** Накопленные секунды по задачам — чтобы править время выбранной задачи */
+  taskTotals: Map<string, number>;
   /** Глобально идущая сессия (может быть этой или другой категории) */
   active: Session | null;
   onClose: () => void;
@@ -50,6 +52,7 @@ export function StationSheet({
   category,
   tasks,
   totalSeconds,
+  taskTotals,
   active,
   onClose,
   onChanged,
@@ -105,6 +108,12 @@ export function StationSheet({
     () => tasks.filter((t) => t.category_id === category.id),
     [tasks, category.id],
   );
+
+  // Правим время того, что выбрано: выбрана задача — её часы, нет — всю станцию
+  const selectedTask = selectedTaskId
+    ? tasksOfCat.find((t) => t.id === selectedTaskId) ?? null
+    : null;
+  const taskSeconds = selectedTask ? taskTotals.get(selectedTask.id) ?? 0 : 0;
 
   async function handleStart() {
     if (busy) return;
@@ -237,13 +246,15 @@ export function StationSheet({
                 transition={{ type: 'spring', stiffness: 120, damping: 22 }}
               />
             </div>
-            {/* забыл включить/выключить таймер — поправить часы руками */}
-            <div className="mt-2 flex justify-end">
+            {/* забыл включить/выключить таймер — поправить часы руками.
+                Плашкой, а не серым текстом: редактор искали и не находили. */}
+            <div className="mt-3">
               <TimeAdjustButton
+                variant="chip"
                 category={category}
-                totalSeconds={totalSeconds}
+                task={selectedTask}
+                totalSeconds={selectedTask ? taskSeconds : totalSeconds}
                 onChanged={onChanged}
-                className="flex items-center gap-1.5 text-[12px] font-medium text-white/55"
               />
             </div>
           </div>

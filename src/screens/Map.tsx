@@ -19,6 +19,7 @@ import {
   getCategoryTotals,
   getLastSession,
   getTasks,
+  getTaskTotals,
   getTodayTotals,
   IS_DEMO,
   startSession,
@@ -137,6 +138,7 @@ export function MapScreen({
   const [categories, setCategories] = useState<Category[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [totals, setTotals] = useState<Map<string, number>>(new Map());
+  const [taskTotals, setTaskTotals] = useState<Map<string, number>>(new Map());
   const [today, setToday] = useState<Map<string, number>>(new Map());
   const [active, setActive] = useState<Session | null>(null);
   const [last, setLast] = useState<Session | null>(null);
@@ -147,6 +149,14 @@ export function MapScreen({
   const [view, setView] = useState<SceneView>('map');
   const [insideId, setInsideId] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  /** Задача, выбранная ДО старта таймера внутри зоны (null = вся станция) */
+  const [pendingTaskId, setPendingTaskId] = useState<string | null>(null);
+  /**
+   * Секунды, накопленные в этом заходе до текущей сессии. Смена задачи режет
+   * запись надвое, но человеку важно, что он сидит за работой полтора часа, —
+   * поэтому часы на экране считают весь заход, а не последнюю запись.
+   */
+  const [visitBase, setVisitBase] = useState(0);
   const [party, setParty] = useState<ZoneCelebration | null>(null);
   const timers = useRef<number[]>([]);
   const deepLinked = useRef(false);
@@ -163,17 +173,20 @@ export function MapScreen({
   });
 
   async function loadAll() {
-    const [cats, allTasks, catTotals, todayTotals, session, lastSession] = await Promise.all([
-      getCategories(),
-      getTasks(),
-      getCategoryTotals(),
-      getTodayTotals(),
-      getActiveSession(),
-      getLastSession(),
-    ]);
+    const [cats, allTasks, catTotals, tskTotals, todayTotals, session, lastSession] =
+      await Promise.all([
+        getCategories(),
+        getTasks(),
+        getCategoryTotals(),
+        getTaskTotals(),
+        getTodayTotals(),
+        getActiveSession(),
+        getLastSession(),
+      ]);
     setCategories(cats);
     setTasks(allTasks);
     setTotals(new Map(catTotals.map((t) => [t.category_id, t.total_seconds])));
+    setTaskTotals(new Map(tskTotals.map((t) => [t.task_id, t.total_seconds])));
     setToday(new Map(todayTotals.map((t) => [t.category_id, t.total_seconds])));
     setActive(session);
     setLast(lastSession);
@@ -252,24 +265,41 @@ export function MapScreen({
     else setOpenedId(id);
   }
 
-  /** Ныряем внутрь зоны и сразу запускаем её таймер (созвон №5: тап = таймер). */
+  /**
+   * Ныряем внутрь зоны. Если у станции есть задачи — сначала даём выбрать, за
+   * что садимся, и только потом старт: раньше тап включал «всю станцию», а
+   * выбранная следом подкатегория начинала запись заново (созвон №5 «тап =
+   * таймер» остаётся для станций без задач — там выбирать нечего).
+   */
   async function enterZone(cat: Category) {
     if (view !== 'map') return;
+    const sameZone = insideId === cat.id;
     setInsideId(cat.id);
     setDetailsOpen(false);
     setView('dive');
     later(() => setView('inside'), DIVE_MS);
-    if (!active || active.category_id !== cat.id) {
-      try {
-        // сессию ставим сразу из ответа: loadAll() тянет ещё пять запросов, и
-        // до его конца оверлей внутри зоны показывал бы «отдыхает» при живом
-        // таймере (а если параллельно доедет чужой loadAll — то и после)
-        setActive(await startSession(cat.id));
-        setNowMs(Date.now());
-        await loadAll();
-      } catch (err) {
-        toast(errorText(err));
-      }
+
+    if (active && active.category_id === cat.id) {
+      setPendingTaskId(active.task_id);
+      return;
+    }
+    if (!sameZone) setVisitBase(0);
+
+    if (tasks.some((t) => t.category_id === cat.id)) {
+      setPendingTaskId(null);
+      later(() => setDetailsOpen(true), DIVE_MS + 150);
+      return;
+    }
+
+    try {
+      // сессию ставим сразу из ответа: loadAll() тянет ещё пять запросов, и
+      // до его конца оверлей внутри зоны показывал бы «отдыхает» при живом
+      // таймере (а если параллельно доедет чужой loadAll — то и после)
+      setActive(await startSession(cat.id));
+      setNowMs(Date.now());
+      await loadAll();
+    } catch (err) {
+      toast(errorText(err));
     }
   }
 
@@ -291,7 +321,9 @@ export function MapScreen({
     try {
       const closed = await stopSession();
       if (closed) {
-        const duration = closed.duration_seconds ?? 0;
+        // празднуем весь заход, а не последний кусок после смены задачи
+        const duration = (closed.duration_seconds ?? 0) + visitBase;
+        setVisitBase(0);
         const totalsNow = await getCategoryTotals().catch(() => []);
         const totalNow =
           totalsNow.find((t) => t.category_id === closed.category_id)?.total_seconds ?? duration;
@@ -313,13 +345,16 @@ export function MapScreen({
     }
   }
 
-  /** Запуск таймера, когда мы уже внутри (после «Стоп» можно продолжить). */
-  async function handleStartInside(taskId?: string) {
+  /** Запуск таймера, когда мы уже внутри — с выбранной задачей. */
+  async function handleStartInside(taskId: string | null = pendingTaskId) {
     if (busy || !insideId) return;
     setBusy(true);
     try {
-      await startSession(insideId, taskId);
+      setActive(await startSession(insideId, taskId ?? undefined));
+      setPendingTaskId(taskId);
+      setVisitBase(0);
       setNowMs(Date.now());
+      setDetailsOpen(false);
       await loadAll();
     } catch (err) {
       toast(errorText(err));
@@ -329,24 +364,26 @@ export function MapScreen({
   }
 
   /**
-   * Переключить задачу, не выходя из зоны. Отдельной ручки «сменить задачу у
-   * идущей сессии» в API нет, поэтому честно закрываем текущую и открываем
-   * новую — общее время не теряется, дробится только запись.
+   * Выбрать задачу. Пока таймер не запущен — это просто выбор, ничего не
+   * стартует. Если работа уже идёт, честно закрываем запись и открываем новую
+   * (отдельной ручки «сменить задачу у идущей сессии» в API нет), но часы
+   * захода при этом не обнуляются — накопленное переезжает в visitBase.
    */
   async function handleSwitchTask(taskId: string | null) {
     if (busy || !insideId) return;
-    if (!active || active.category_id !== insideId) {
-      await handleStartInside(taskId ?? undefined);
-      return;
-    }
+    setPendingTaskId(taskId);
+    if (!active || active.category_id !== insideId) return;
     if (active.task_id === taskId) return;
     setBusy(true);
     try {
-      await stopSession();
-      await startSession(insideId, taskId ?? undefined);
+      const closed = await stopSession();
+      const started = await startSession(insideId, taskId ?? undefined);
+      setVisitBase((v) => v + (closed?.duration_seconds ?? 0));
+      setActive(started);
       setNowMs(Date.now());
       await loadAll();
-      toast('Задача переключена — время идёт дальше, запись начата заново.');
+      const name = taskId ? tasks.find((t) => t.id === taskId)?.name ?? 'задачу' : 'всю станцию';
+      toast(`Дальше пишем в «${name}» — часы захода не сбрасываются.`);
     } catch (err) {
       toast(errorText(err));
     } finally {
@@ -389,7 +426,17 @@ export function MapScreen({
   const hoursToNextStage = nextStage ? Math.max(1, Math.ceil(nextStage.minHours - insideSeconds / 3600)) : 0;
   const runningInside = !!active && !!insideCat && active.category_id === insideCat.id;
   const insideElapsed = runningInside && active ? elapsedSeconds(active.started_at, nowMs) : 0;
+  // часы захода: смена задачи их не сбрасывает
+  const visitElapsed = runningInside ? visitBase + insideElapsed : 0;
   const insideTasks = insideCat ? tasks.filter((t) => t.category_id === insideCat.id) : [];
+  // что выбрано: у идущей сессии — её задача, до старта — намеченная
+  const chosenTaskId = runningInside && active ? active.task_id : pendingTaskId;
+  const chosenTask = chosenTaskId ? insideTasks.find((t) => t.id === chosenTaskId) ?? null : null;
+  const chosenSeconds = chosenTask
+    ? taskTotals.get(chosenTask.id) ?? 0
+    : insideCat
+      ? totals.get(insideCat.id) ?? 0
+      : 0;
   // подпись ручки: обещаем ровно то, что за ней есть (у станции без задач
   // блок «Задача» не рисуется — незачем звать за задачами в пустоту)
   const detailsHint = insideTasks.length > 0 ? 'Задачи и прогресс' : 'Прогресс и время';
@@ -600,8 +647,24 @@ export function MapScreen({
                     {runningInside ? insideText.running : insideText.idle}
                   </p>
                   <p className="font-display text-2xl tabular-nums text-lime-300">
-                    {formatClock(insideElapsed)}
+                    {formatClock(visitElapsed)}
                   </p>
+                  {/* видно, куда пишется время: «вся станция» или конкретная задача */}
+                  {insideTasks.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setDetailsOpen(true)}
+                      className="mt-0.5 flex max-w-full items-center gap-1 truncate text-[11px] text-white/60"
+                    >
+                      <span className="truncate">
+                        {runningInside ? 'Пишем в: ' : 'Начнём с: '}
+                        <span className="text-white/85">
+                          {chosenTask ? chosenTask.name : 'вся станция'}
+                        </span>
+                      </span>
+                      <span className="text-white/40">· сменить</span>
+                    </button>
+                  )}
                 </div>
                 {runningInside ? (
                   <motion.button
@@ -620,7 +683,7 @@ export function MapScreen({
                     whileTap={{ scale: 0.94 }}
                     disabled={busy}
                     onClick={() => void handleStartInside()}
-                    className="flex items-center gap-2 rounded-2xl bg-lime-300 px-5 py-3 font-display text-sm font-medium text-emerald-950 disabled:opacity-60"
+                    className="flex shrink-0 items-center gap-2 rounded-2xl bg-lime-300 px-5 py-3 font-display text-sm font-medium text-emerald-950 disabled:opacity-60"
                   >
                     <PlayIcon className="h-5 w-5" />
                     {insideText.start}
@@ -716,13 +779,16 @@ export function MapScreen({
                 <p className="mt-1.5 text-[11px] text-white/45">
                   Сейчас: {insideStageTitle} (уровень {insideLevel} из {MAX_LEVEL})
                 </p>
-                {/* забыл включить/выключить таймер — поправить часы руками */}
-                <div className="mt-2 flex justify-end">
+                {/* забыл включить/выключить таймер — поправить часы руками.
+                    Плашкой, а не серым текстом: редактор искали и не находили.
+                    Правим то, что выбрано: задачу или станцию целиком. */}
+                <div className="mt-3">
                   <TimeAdjustButton
+                    variant="chip"
                     category={insideCat}
-                    totalSeconds={totals.get(insideCat.id) ?? 0}
+                    task={chosenTask}
+                    totalSeconds={chosenSeconds}
                     onChanged={loadAll}
-                    className="flex items-center gap-1.5 text-[12px] font-medium text-white/55"
                   />
                 </div>
               </div>
@@ -730,7 +796,7 @@ export function MapScreen({
               {insideTasks.length > 0 && (
                 <div>
                   <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-white/50">
-                    Задача
+                    {runningInside ? 'Задача' : 'За что садимся'}
                   </p>
                   <div className="flex flex-wrap gap-2">
                     <button
@@ -738,7 +804,7 @@ export function MapScreen({
                       disabled={busy}
                       onClick={() => void handleSwitchTask(null)}
                       className={`rounded-full px-3.5 py-1.5 text-sm disabled:opacity-60 ${
-                        (active?.task_id ?? null) === null && runningInside
+                        chosenTaskId === null
                           ? 'bg-white font-semibold text-gray-900'
                           : 'glass-dark !rounded-full text-white/80'
                       }`}
@@ -752,7 +818,7 @@ export function MapScreen({
                         disabled={busy}
                         onClick={() => void handleSwitchTask(t.id)}
                         className={`rounded-full px-3.5 py-1.5 text-sm disabled:opacity-60 ${
-                          runningInside && active?.task_id === t.id
+                          chosenTaskId === t.id
                             ? 'bg-white font-semibold text-gray-900'
                             : 'glass-dark !rounded-full text-white/80'
                         }`}
@@ -761,6 +827,19 @@ export function MapScreen({
                       </button>
                     ))}
                   </div>
+                  {/* Пока таймер не пошёл, выбор — это только выбор: запускает кнопка */}
+                  {!runningInside && (
+                    <motion.button
+                      type="button"
+                      whileTap={{ scale: 0.96 }}
+                      disabled={busy}
+                      onClick={() => void handleStartInside()}
+                      className="mt-3 flex w-full items-center justify-center gap-2 rounded-3xl bg-lime-300 py-3.5 font-display text-sm font-medium text-emerald-950 shadow-lg disabled:opacity-60"
+                    >
+                      <PlayIcon className="h-5 w-5" />
+                      {insideText.start}: {chosenTask ? chosenTask.name : 'вся станция'}
+                    </motion.button>
+                  )}
                 </div>
               )}
             </motion.div>
@@ -836,6 +915,7 @@ export function MapScreen({
             category={openedCat}
             tasks={tasks}
             totalSeconds={totals.get(openedCat.id) ?? 0}
+            taskTotals={taskTotals}
             active={active}
             onClose={() => setOpenedId(null)}
             onChanged={loadAll}

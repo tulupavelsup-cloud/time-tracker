@@ -5,10 +5,21 @@
  */
 
 import type { User } from '@supabase/supabase-js';
+import { dayBounds, dayKey } from '../lib/day';
+import {
+  clipSpan,
+  fillFromEnd,
+  freeSpans,
+  planCut,
+  spanSeconds,
+  totalSeconds,
+  type Span,
+} from '../lib/spans';
 import type {
   Category,
   CategoryTotal,
   CategoryUpdate,
+  DayInfo,
   Session,
   StatsPeriod,
   StatsResult,
@@ -16,6 +27,9 @@ import type {
   TaskTotal,
   TaskUpdate,
   ThemeSlug,
+  TimeEdit,
+  TimeEditInput,
+  TimeEditResult,
 } from './types';
 
 const DEMO_USER_ID = 'demo-user';
@@ -252,57 +266,214 @@ export async function startSession(categoryId: string, taskId?: string): Promise
 }
 
 // ---------- ручная правка времени ----------
+// Логика та же, что в api/adjust.ts: правка привязана ко дню и ложится только
+// в свободные промежутки — чтобы демо врало ровно так же, как бой (то есть никак).
 
-export async function addTime(categoryId: string, seconds: number, taskId?: string | null): Promise<Session> {
-  const sec = Math.max(1, Math.round(seconds));
-  const active = sessions.find((s) => s.ended_at === null);
-  const endMs = active ? Math.min(Date.now(), new Date(active.started_at).getTime()) : Date.now();
-  const s: Session = {
-    id: uid('s'),
-    user_id: DEMO_USER_ID,
-    category_id: categoryId,
-    task_id: taskId ?? null,
-    started_at: new Date(endMs - sec * 1000).toISOString(),
-    ended_at: new Date(endMs).toISOString(),
-    duration_seconds: sec,
-    note: 'Добавлено вручную',
+const edits: TimeEdit[] = [];
+
+/** Отрезок сессии на оси времени (у идущей конец — «сейчас»). */
+function spanOf(s: Session, nowMs: number): Span {
+  return {
+    startMs: new Date(s.started_at).getTime(),
+    endMs: s.ended_at ? new Date(s.ended_at).getTime() : nowMs,
   };
-  sessions.push(s);
-  return delay({ ...s });
 }
 
-export async function subtractTime(
+/** Сессии, пересекающие окно дня. */
+function inRange(startMs: number, endMs: number, nowMs: number): Session[] {
+  return sessions.filter((s) => {
+    const sp = spanOf(s, nowMs);
+    return sp.startMs < endMs && sp.endMs > startMs;
+  });
+}
+
+export async function getDayInfo(
+  day: string,
+  categoryId: string,
+  taskId?: string | null,
+): Promise<DayInfo> {
+  const { startMs, endMs } = dayBounds(day);
+  if (endMs <= startMs) return delay({ recorded: 0, free: 0 });
+  const nowMs = Date.now();
+  const rows = inRange(startMs, endMs, nowMs);
+  const recorded = totalSeconds(
+    rows
+      .filter((s) => s.category_id === categoryId && (!taskId || s.task_id === taskId))
+      .map((s) => clipSpan(spanOf(s, nowMs), startMs, endMs)),
+  );
+  const free = totalSeconds(
+    freeSpans(rows.map((s) => clipSpan(spanOf(s, nowMs), startMs, endMs)), startMs, endMs),
+  );
+  return delay({ recorded, free });
+}
+
+function placeTime(
   categoryId: string,
   seconds: number,
-  taskId?: string | null,
-): Promise<{ seconds: number; stoppedActive: boolean }> {
-  let left = Math.max(0, Math.round(seconds));
-  let cut = 0;
-  let stoppedActive = false;
-  const mine = sessions
-    .filter((s) => s.category_id === categoryId && (!taskId || s.task_id === taskId))
-    .sort((a, b) => (a.started_at < b.started_at ? 1 : -1));
-
-  for (const s of mine) {
-    if (left <= 0) break;
-    const startMs = new Date(s.started_at).getTime();
-    const endMs = s.ended_at ? new Date(s.ended_at).getTime() : Date.now();
-    const duration = Math.max(0, Math.round((endMs - startMs) / 1000));
-    if (duration === 0) continue;
-    const take = Math.min(duration, left);
-    if (take >= duration) {
-      sessions.splice(sessions.indexOf(s), 1);
-      if (!s.ended_at) stoppedActive = true;
-    } else if (s.ended_at) {
-      s.ended_at = new Date(endMs - take * 1000).toISOString();
-      s.duration_seconds = duration - take;
-    } else {
-      s.started_at = new Date(startMs + take * 1000).toISOString();
-    }
-    cut += take;
-    left -= take;
+  taskId: string | null,
+  day: string,
+): { seconds: number; sessionIds: string[] } {
+  const { startMs, endMs } = dayBounds(day);
+  if (seconds <= 0 || endMs <= startMs) return { seconds: 0, sessionIds: [] };
+  const nowMs = Date.now();
+  const rows = inRange(startMs, endMs, nowMs);
+  const free = freeSpans(
+    rows.map((s) => clipSpan(spanOf(s, nowMs), startMs, endMs)),
+    startMs,
+    endMs,
+  );
+  const blocks = fillFromEnd(free, seconds);
+  const ids: string[] = [];
+  for (const b of blocks) {
+    const s: Session = {
+      id: uid('s'),
+      user_id: DEMO_USER_ID,
+      category_id: categoryId,
+      task_id: taskId,
+      started_at: new Date(b.startMs).toISOString(),
+      ended_at: new Date(b.endMs).toISOString(),
+      duration_seconds: spanSeconds(b),
+      note: 'Добавлено вручную',
+    };
+    sessions.push(s);
+    ids.push(s.id);
   }
-  return delay({ seconds: cut, stoppedActive });
+  return { seconds: blocks.reduce((sum, b) => sum + spanSeconds(b), 0), sessionIds: ids };
+}
+
+function cutTime(
+  categoryId: string,
+  seconds: number,
+  taskId: string | null,
+  day: string | null,
+): { seconds: number; stoppedActive: boolean } {
+  // без дня окно — вся история: режем самые свежие записи
+  const { startMs, endMs } = day ? dayBounds(day) : { startMs: 0, endMs: Date.now() };
+  if (seconds <= 0 || endMs <= startMs) return { seconds: 0, stoppedActive: false };
+  const nowMs = Date.now();
+
+  const mine = inRange(startMs, endMs, nowMs).filter(
+    (s) => s.category_id === categoryId && (!taskId || s.task_id === taskId),
+  );
+  const byId = new Map(mine.map((s) => [s.id, s]));
+  const plan = planCut(
+    mine.map((s) => ({ id: s.id, span: spanOf(s, nowMs), active: !s.ended_at })),
+    seconds,
+    startMs,
+    endMs,
+  );
+
+  for (const op of plan.ops) {
+    const s = byId.get(op.id);
+    if (!s) continue;
+    const sp = spanOf(s, nowMs);
+    if (op.kind === 'delete') {
+      sessions.splice(sessions.indexOf(s), 1);
+    } else if (op.kind === 'shiftStart') {
+      s.started_at = new Date(op.startMs).toISOString();
+    } else if (op.kind === 'trimEnd') {
+      s.ended_at = new Date(op.endMs).toISOString();
+      s.duration_seconds = spanSeconds({ startMs: sp.startMs, endMs: op.endMs });
+    } else if (op.kind === 'moveStart') {
+      s.started_at = new Date(op.startMs).toISOString();
+      s.duration_seconds = spanSeconds({ startMs: op.startMs, endMs: sp.endMs });
+    } else {
+      s.ended_at = new Date(op.endMs).toISOString();
+      s.duration_seconds = spanSeconds({ startMs: sp.startMs, endMs: op.endMs });
+      sessions.push({
+        id: uid('s'),
+        user_id: DEMO_USER_ID,
+        category_id: s.category_id,
+        task_id: s.task_id,
+        started_at: new Date(op.tail.startMs).toISOString(),
+        ended_at: new Date(op.tail.endMs).toISOString(),
+        duration_seconds: spanSeconds(op.tail),
+        note: s.note,
+      });
+    }
+  }
+  return { seconds: plan.seconds, stoppedActive: plan.stoppedActive };
+}
+
+function pushEdit(
+  input: TimeEditInput,
+  kind: 'add' | 'cut',
+  seconds: number,
+  sessionIds: string[],
+  day: string | null,
+): TimeEdit {
+  const before = Math.round(input.beforeSeconds);
+  const edit: TimeEdit = {
+    id: uid('e'),
+    user_id: DEMO_USER_ID,
+    category_id: input.categoryId,
+    task_id: input.taskId ?? null,
+    kind,
+    seconds,
+    day,
+    before_seconds: before,
+    after_seconds: kind === 'add' ? before + seconds : Math.max(0, before - seconds),
+    session_ids: sessionIds,
+    undone_at: null,
+    created_at: new Date().toISOString(),
+  };
+  edits.unshift(edit);
+  return edit;
+}
+
+export async function addTime(input: TimeEditInput): Promise<TimeEditResult> {
+  const requested = Math.max(0, Math.round(input.seconds));
+  const day = input.day ?? dayKey();
+  const { seconds, sessionIds } = placeTime(input.categoryId, requested, input.taskId ?? null, day);
+  return delay({
+    seconds,
+    requested,
+    stoppedActive: false,
+    edit: seconds > 0 ? pushEdit(input, 'add', seconds, sessionIds, day) : null,
+  });
+}
+
+export async function subtractTime(input: TimeEditInput): Promise<TimeEditResult> {
+  const requested = Math.max(0, Math.round(input.seconds));
+  const { seconds, stoppedActive } = cutTime(
+    input.categoryId,
+    requested,
+    input.taskId ?? null,
+    input.day,
+  );
+  return delay({
+    seconds,
+    requested,
+    stoppedActive,
+    edit: seconds > 0 ? pushEdit(input, 'cut', seconds, [], input.day) : null,
+  });
+}
+
+export async function listTimeEdits(limit = 30, categoryId?: string): Promise<TimeEdit[]> {
+  return delay(
+    edits.filter((e) => !categoryId || e.category_id === categoryId).slice(0, limit),
+  );
+}
+
+export async function isEditLogAvailable(): Promise<boolean> {
+  return delay(true);
+}
+
+export async function undoTimeEdit(edit: TimeEdit): Promise<TimeEditResult> {
+  let seconds = 0;
+  if (edit.kind === 'add') {
+    for (const id of edit.session_ids) {
+      const s = sessions.find((x) => x.id === id);
+      if (!s) continue;
+      seconds += s.duration_seconds ?? 0;
+      sessions.splice(sessions.indexOf(s), 1);
+    }
+  } else {
+    seconds = placeTime(edit.category_id, edit.seconds, edit.task_id, edit.day ?? dayKey()).seconds;
+  }
+  const row = edits.find((e) => e.id === edit.id);
+  if (row) row.undone_at = new Date().toISOString();
+  return delay({ seconds, requested: edit.seconds, stoppedActive: false, edit: null });
 }
 
 // ---------- stats ----------

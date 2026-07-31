@@ -13,11 +13,14 @@ import {
   getCategoryTotals,
   getStats,
   getTasks,
+  listTimeEdits,
+  undoTimeEdit,
   type Category,
   type CategoryTotal,
   type StatsPeriod,
   type StatsResult,
   type Task,
+  type TimeEdit,
 } from '../api';
 import { formatDuration, formatHours, percentOf } from '../lib/format';
 import { categoryColor } from '../lib/palette';
@@ -25,6 +28,7 @@ import { getLevelProgress, getNextLevel, getZoneLevel } from '../lib/thresholds'
 import { getTheme } from '../lib/themes';
 import { errorText, useToast } from '../ui/Toast';
 import { LoadingBlock } from '../ui/Spinner';
+import { TimeEditsList } from '../ui/TimeEdits';
 
 const PERIODS: { value: StatsPeriod; label: string }[] = [
   { value: 'day', label: 'День' },
@@ -39,22 +43,26 @@ export function StatsScreen() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [totals, setTotals] = useState<CategoryTotal[]>([]);
+  const [edits, setEdits] = useState<TimeEdit[]>([]);
   const [loading, setLoading] = useState(true);
+  const [undoing, setUndoing] = useState(false);
 
   const load = useCallback(
     async (p: StatsPeriod) => {
       setLoading(true);
       try {
-        const [s, cats, allTasks, catTotals] = await Promise.all([
+        const [s, cats, allTasks, catTotals, editRows] = await Promise.all([
           getStats(p),
           getCategories(),
           getTasks(),
           getCategoryTotals(),
+          listTimeEdits(20).catch(() => [] as TimeEdit[]),
         ]);
         setStats(s);
         setCategories(cats);
         setTasks(allTasks);
         setTotals(catTotals);
+        setEdits(editRows);
       } catch (err) {
         toast(errorText(err));
       } finally {
@@ -62,6 +70,28 @@ export function StatsScreen() {
       }
     },
     [toast],
+  );
+
+  /** Вернуть время, снятое или добавленное правкой. */
+  const handleUndo = useCallback(
+    async (edit: TimeEdit) => {
+      if (undoing) return;
+      setUndoing(true);
+      try {
+        const res = await undoTimeEdit(edit);
+        toast(
+          res.seconds > 0
+            ? `Правку отменили: вернули ${formatDuration(res.seconds)}.`
+            : 'Правку отменили.',
+        );
+        await load(period);
+      } catch (err) {
+        toast(errorText(err));
+      } finally {
+        setUndoing(false);
+      }
+    },
+    [undoing, toast, load, period],
   );
 
   useEffect(() => {
@@ -241,6 +271,28 @@ export function StatsScreen() {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {/* Журнал ручных правок: видно, где откат сработал, а где нет */}
+      {edits.length > 0 && (
+        <div className="glass-dark p-4">
+          <h2 className="mb-1 text-xs font-semibold uppercase tracking-wide text-white/50">
+            Правки времени
+          </h2>
+          <p className="mb-3 text-xs text-white/45">
+            Что поправили руками и за какой день. Можно вернуть как было.
+          </p>
+          <TimeEditsList
+            edits={edits}
+            subjectOf={(e) => {
+              const cat = categoryById.get(e.category_id)?.name ?? 'Архивная станция';
+              const t = e.task_id ? taskById.get(e.task_id)?.name : null;
+              return t ? `${cat} · ${t}` : cat;
+            }}
+            onUndo={(e) => void handleUndo(e)}
+            busy={undoing}
+          />
         </div>
       )}
 

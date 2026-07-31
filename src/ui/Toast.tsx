@@ -63,7 +63,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ toast }}>
       {children}
-      <div className="pointer-events-none fixed inset-x-0 bottom-24 z-50 flex flex-col items-center gap-2 px-4">
+      {/* Выше шторок (z-60) и празднований (z-50): подтверждение правки
+          пряталось под панелью — человек не видел, сработал откат или нет. */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-24 z-[80] flex flex-col items-center gap-2 px-4">
         {items.map((t) => (
           <div
             key={t.id}

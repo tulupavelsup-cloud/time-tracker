@@ -12,6 +12,7 @@ import * as realCategories from './categories';
 import * as realTasks from './tasks';
 import * as realSessions from './sessions';
 import * as realAdjust from './adjust';
+import * as realEdits from './edits';
 import * as realStats from './stats';
 import * as demo from './demo';
 
@@ -45,6 +46,10 @@ export const getLastSession = IS_DEMO ? demo.getLastSession : realSessions.getLa
 
 export const addTime = IS_DEMO ? demo.addTime : realAdjust.addTime;
 export const subtractTime = IS_DEMO ? demo.subtractTime : realAdjust.subtractTime;
+export const getDayInfo = IS_DEMO ? demo.getDayInfo : realAdjust.getDayInfo;
+export const undoTimeEdit = IS_DEMO ? demo.undoTimeEdit : realAdjust.undoTimeEdit;
+export const listTimeEdits = IS_DEMO ? demo.listTimeEdits : realEdits.listTimeEdits;
+export const isEditLogAvailable = IS_DEMO ? demo.isEditLogAvailable : realEdits.isEditLogAvailable;
 
 export const getCategoryTotals = IS_DEMO ? demo.getCategoryTotals : realStats.getCategoryTotals;
 export const getTaskTotals = IS_DEMO ? demo.getTaskTotals : realStats.getTaskTotals;
