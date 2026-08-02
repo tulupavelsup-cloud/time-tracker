@@ -3,16 +3,32 @@
  * Человекочитаемое: «2 ч 15 мин»; для тикающего таймера: «00:35:12».
  */
 
+/** Часы и минуты по секундам (минуты округляются вниз — час не «набегает»). */
+export function splitDuration(totalSeconds: number): { hours: number; minutes: number } {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  return { hours: Math.floor(s / 3600), minutes: Math.floor((s % 3600) / 60) };
+}
+
 /** «2 ч 15 мин», «45 мин», «меньше минуты», «0 мин». */
 export function formatDuration(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds));
   if (s === 0) return '0 мин';
   if (s < 60) return 'меньше минуты';
-  const hours = Math.floor(s / 3600);
-  const minutes = Math.floor((s % 3600) / 60);
+  const { hours, minutes } = splitDuration(s);
   if (hours === 0) return `${minutes} мин`;
   if (minutes === 0) return `${hours} ч`;
   return `${hours} ч ${minutes} мин`;
+}
+
+/**
+ * Время для СТОЛБЦА, где цифры сравнивают глазом: «2:15», «0:45», «12:03».
+ * Минуты всегда двузначные, поэтому колонка выравнивается сама и «45 мин»
+ * больше не оказывается длиннее, чем «3 ч». Созвон №6 — «поправить время,
+ * чтобы оно нормально было». В прозе по-прежнему formatDuration.
+ */
+export function formatHM(totalSeconds: number): string {
+  const { hours, minutes } = splitDuration(totalSeconds);
+  return `${hours}:${String(minutes).padStart(2, '0')}`;
 }
 
 /** «00:35:12» — часы:минуты:секунды для идущего таймера. */

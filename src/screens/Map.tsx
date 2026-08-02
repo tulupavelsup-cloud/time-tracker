@@ -1,7 +1,7 @@
 /**
- * Экран «Домой» = 3D-остров (Three.js). Наклонённая карта-диорама: можно
- * перетаскивать, приближать/отдалять и вращать. Станции-категории стоят на
- * острове; шахта и банк — 3D-модели, к которым можно подъехать и рассмотреть.
+ * Экран «Домой» = 3D-карта-город (Three.js). Созвон №6: карта СТАТИЧНА —
+ * перетаскивание и зум убраны, весь город виден целиком на одном экране. В
+ * центре площадь с ратушей, вокруг — до шести станций-категорий.
  *
  * Тап по обычной станции открывает панель запуска таймера (StationSheet), а тап
  * по зоне со своим интерьером (ШАХТА, БАНК) проваливает внутрь: камера ныряет в
@@ -14,6 +14,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import {
+  closeStaleSession,
   getActiveSession,
   getCategories,
   getCategoryTotals,
@@ -108,6 +109,14 @@ const INSIDE_TEXT: Record<InteriorTheme, {
     party: 'Пласт поддался. Промысел вырос — так и строятся империи.',
     top: 'глубже некуда — Нефтяное сердце',
   },
+  farm: {
+    back: 'Выйти из теплицы',
+    idle: 'Грядки спят',
+    running: 'Идёт работа',
+    start: 'Растить',
+    party: 'Урожай собран. Ферма выросла — так и строятся империи.',
+    top: 'богаче некуда — Житница',
+  },
 };
 
 function greeting(): string {
@@ -171,6 +180,8 @@ export function MapScreen({
     const n = Number(raw);
     return Number.isInteger(n) && n >= 0 && n <= MAX_LEVEL ? n : null;
   });
+  /** Развёрнут ли демо-переключатель уровней (по умолчанию — нет). */
+  const [levelsOpen, setLevelsOpen] = useState(false);
 
   async function loadAll() {
     const [cats, allTasks, catTotals, tskTotals, todayTotals, session, lastSession] =
@@ -210,7 +221,17 @@ export function MapScreen({
     let cancelled = false;
     (async () => {
       try {
+        // Сначала чиним забытый со вчера таймер: сутки считаются строго
+        // 00:00–00:00, и сессия через полночь не тянется (созвон №6, «16 часов»)
+        const stale = await closeStaleSession().catch(() => null);
         await loadAll();
+        if (stale && !cancelled) {
+          toast(
+            `Таймер шёл с прошлых суток — остановили его на полуночи ` +
+              `(${formatDuration(stale.duration_seconds ?? 0)} записали во вчера). ` +
+              `Если работали дольше, допишите время руками.`,
+          );
+        }
       } catch (err) {
         if (!cancelled) toast(errorText(err));
       } finally {
@@ -397,7 +418,7 @@ export function MapScreen({
     try {
       await startSession(last.category_id, last.task_id ?? undefined);
       await loadAll();
-      setOpenedId(last.category_id);
+      handleStation(last.category_id);
     } catch (err) {
       toast(errorText(err));
     } finally {
@@ -501,7 +522,7 @@ export function MapScreen({
           <motion.button
             type="button"
             whileTap={{ scale: 0.98 }}
-            onClick={() => setOpenedId(activeCat.id)}
+            onClick={() => handleStation(activeCat.id)}
             className="glass-dark mt-3 flex w-full items-center gap-3 px-4 py-3 text-left"
           >
             <motion.span
@@ -537,48 +558,64 @@ export function MapScreen({
         )}
       </div>
 
-      {/* Подсказка снизу */}
+      {/* Подсказка снизу. Карта статична (созвон №6): тащить и зумить больше
+          нечего — остался один жест, тап по станции. */}
       {categories.length > 0 && !immersed && (
         <div className="pointer-events-none fixed bottom-24 left-1/2 z-20 -translate-x-1/2 rounded-full bg-black/35 px-3 py-1 text-[11px] text-white/85 backdrop-blur">
-          Тащи — едешь по карте · щипок — зум · тап по станции
+          Тап по станции — начать работу
         </div>
       )}
 
-      {/* Демо: переключатель уровня зон с 3D-моделью — щёлкай и смотри стадии */}
-      {IS_DEMO &&
-        !immersed &&
-        categories.some((c) => hasInterior(c.theme)) && (
+      {/* Демо: переключатель уровня зон — щёлкай и смотри стадии. Свёрнут в
+          кнопку: карта теперь статична и занимает кадр целиком, а развёрнутая
+          колонка закрывала собой левые станции. */}
+      {IS_DEMO && !immersed && categories.some((c) => hasInterior(c.theme)) && (
         <div className="fixed left-2 top-1/2 z-30 -translate-y-1/2">
-          <div className="glass-dark flex flex-col gap-1 p-1.5">
-            <span className="px-1 pb-0.5 text-center text-[9px] font-semibold uppercase tracking-wide text-white/55">
-              Уровень
-            </span>
-            <button
-              type="button"
-              onClick={() => setDemoLevel(null)}
-              className={`h-7 w-9 rounded-lg text-[11px] font-semibold transition ${
-                demoLevel === null ? 'bg-lime-300 text-emerald-950' : 'text-white/70 hover:bg-white/10'
-              }`}
-            >
-              Авто
-            </button>
-            {ZONE_LEVELS.map((z) => (
+          {levelsOpen ? (
+            <div className="glass-dark flex flex-col gap-1 p-1.5">
               <button
-                key={z.level}
                 type="button"
-                title={z.title}
-                onClick={() => setDemoLevel(z.level)}
+                onClick={() => setLevelsOpen(false)}
+                aria-label="Свернуть уровни"
+                className="px-1 pb-0.5 text-center text-[9px] font-semibold uppercase tracking-wide text-white/55"
+              >
+                Уровень ✕
+              </button>
+              <button
+                type="button"
+                onClick={() => setDemoLevel(null)}
                 className={`h-7 w-9 rounded-lg text-[11px] font-semibold transition ${
-                  demoLevel === z.level ? 'bg-lime-300 text-emerald-950' : 'text-white/70 hover:bg-white/10'
+                  demoLevel === null ? 'bg-lime-300 text-emerald-950' : 'text-white/70 hover:bg-white/10'
                 }`}
               >
-                {z.level}
+                Авто
               </button>
-            ))}
-            <span className="px-0.5 pt-0.5 text-center text-[8px] leading-tight text-white/50">
-              {demoLevel === null ? 'по часам' : ZONE_LEVELS[demoLevel].title}
-            </span>
-          </div>
+              {ZONE_LEVELS.map((z) => (
+                <button
+                  key={z.level}
+                  type="button"
+                  title={z.title}
+                  onClick={() => setDemoLevel(z.level)}
+                  className={`h-7 w-9 rounded-lg text-[11px] font-semibold transition ${
+                    demoLevel === z.level ? 'bg-lime-300 text-emerald-950' : 'text-white/70 hover:bg-white/10'
+                  }`}
+                >
+                  {z.level}
+                </button>
+              ))}
+              <span className="px-0.5 pt-0.5 text-center text-[8px] leading-tight text-white/50">
+                {demoLevel === null ? 'по часам' : ZONE_LEVELS[demoLevel].title}
+              </span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setLevelsOpen(true)}
+              className="glass-dark flex h-9 w-9 items-center justify-center !rounded-2xl text-[11px] font-semibold text-white/75"
+            >
+              {demoLevel === null ? 'ур' : demoLevel}
+            </button>
+          )}
         </div>
       )}
 
@@ -692,36 +729,52 @@ export function MapScreen({
               </div>
             </motion.div>
 
-            {/* Демо: пролистать все уровни вживую (шкала общая с картой) */}
+            {/* Демо: пролистать все уровни вживую (шкала общая с картой).
+                Свёрнут в кнопку — колонка закрывала половину интерьера. */}
             {IS_DEMO && (
               <div className="pointer-events-auto absolute left-2 top-1/2 -translate-y-1/2">
-                <div className="glass-dark flex flex-col gap-0.5 p-1.5">
-                  <span className="px-1 pb-0.5 text-center text-[9px] font-semibold uppercase tracking-wide text-white/55">
-                    Уровень
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setDemoLevel(null)}
-                    className={`h-6 w-8 rounded-lg text-[10px] font-semibold transition ${
-                      demoLevel === null ? 'bg-lime-300 text-emerald-950' : 'text-white/70'
-                    }`}
-                  >
-                    Авто
-                  </button>
-                  {INTERIOR_STAGES[insideTheme].map((st) => (
+                {levelsOpen ? (
+                  <div className="glass-dark flex flex-col gap-0.5 p-1.5">
                     <button
-                      key={st.level}
                       type="button"
-                      title={st.title}
-                      onClick={() => setDemoLevel(st.level)}
+                      onClick={() => setLevelsOpen(false)}
+                      aria-label="Свернуть уровни"
+                      className="px-1 pb-0.5 text-center text-[9px] font-semibold uppercase tracking-wide text-white/55"
+                    >
+                      Уровень ✕
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDemoLevel(null)}
                       className={`h-6 w-8 rounded-lg text-[10px] font-semibold transition ${
-                        demoLevel === st.level ? 'bg-lime-300 text-emerald-950' : 'text-white/70'
+                        demoLevel === null ? 'bg-lime-300 text-emerald-950' : 'text-white/70'
                       }`}
                     >
-                      {st.level}
+                      Авто
                     </button>
-                  ))}
-                </div>
+                    {INTERIOR_STAGES[insideTheme].map((st) => (
+                      <button
+                        key={st.level}
+                        type="button"
+                        title={st.title}
+                        onClick={() => setDemoLevel(st.level)}
+                        className={`h-6 w-8 rounded-lg text-[10px] font-semibold transition ${
+                          demoLevel === st.level ? 'bg-lime-300 text-emerald-950' : 'text-white/70'
+                        }`}
+                      >
+                        {st.level}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setLevelsOpen(true)}
+                    className="glass-dark flex h-9 w-9 items-center justify-center !rounded-2xl text-[11px] font-semibold text-white/75"
+                  >
+                    {demoLevel === null ? 'ур' : demoLevel}
+                  </button>
+                )}
               </div>
             )}
           </motion.div>

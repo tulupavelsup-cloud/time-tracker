@@ -3,8 +3,12 @@
  * (таблицы tt_*) и результаты RPC-функций.
  */
 
-/** Slug темы зоны на планете (см. src/lib/themes.ts). Набор расширяемый. */
-export type ThemeSlug = 'mine' | 'corporation' | 'spaceport' | 'oil' | 'bank';
+/**
+ * Slug темы зоны на планете (см. src/lib/themes.ts). Тем ровно шесть — столько
+ * же, сколько мест под станции на статичной карте (созвон №6: седьмую категорию
+ * создать нельзя, иначе городу некуда расти).
+ */
+export type ThemeSlug = 'mine' | 'corporation' | 'spaceport' | 'oil' | 'bank' | 'farm';
 
 export type StatsPeriod = 'day' | 'week' | 'month';
 

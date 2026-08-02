@@ -61,6 +61,33 @@ export function getLevelProgress(totalSeconds: number): number {
 /** Максимальный уровень зоны — одинаков снаружи и внутри. */
 export const MAX_LEVEL = ZONE_LEVELS[ZONE_LEVELS.length - 1].level;
 
+/* ──────────────── ЦЕНТР ГОРОДА: ратуша на площади ────────────────
+   Созвон №6: «посередине что-то основное, и вокруг него всё пляшет». Ратуша —
+   не категория, а общий итог: она растёт от СУММЫ часов по всем станциям.
+   Поэтому и пороги у неё свои — вчетверо выше зонных, иначе она упиралась бы в
+   максимум раньше первой же станции. */
+
+/** Названия уровней ратуши: 0 = ещё стройплощадка. */
+export const TOWN_TITLES = [
+  'Стройплощадка',
+  'Сруб',
+  'Ратуша',
+  'Часовая башня',
+  'Городская управа',
+  'Дворец',
+  'Столица',
+] as const;
+
+/** Уровень ратуши 0..6 по сумме секунд всех станций. */
+export function getTownLevel(totalSeconds: number): number {
+  const hours = totalSeconds / 3600;
+  let level = 0;
+  ZONE_LEVELS.forEach((lvl) => {
+    if (hours >= lvl.minHours * 4) level = lvl.level;
+  });
+  return level;
+}
+
 /* ──────────── ВНУТРЕННОСТИ ЗОН: ТА ЖЕ лестница, что и снаружи ────────────
    Раньше внутри шахты жила отдельная шкала на 10 стадий: снаружи «уровень 5 из
    6», внутри «стадия 8 из 10» — одни и те же часы, разные цифры. Теперь ступени
@@ -68,7 +95,7 @@ export const MAX_LEVEL = ZONE_LEVELS[ZONE_LEVELS.length - 1].level;
    названия — у каждой темы свои (шахта копает вглубь, банк богатеет). */
 
 /** Темы зон, у которых есть свой интерьер: тап по такой станции = провал внутрь. */
-export type InteriorTheme = 'mine' | 'bank' | 'corporation' | 'spaceport' | 'oil';
+export type InteriorTheme = 'mine' | 'bank' | 'corporation' | 'spaceport' | 'oil' | 'farm';
 
 export interface InteriorStage {
   /** Номер уровня, 0..6 — ровно как снаружи */
@@ -86,6 +113,7 @@ const INTERIOR_TITLES: Record<InteriorTheme, string[]> = {
   corporation: ['Каморка', 'Кабинет', 'Опенспейс', 'Отдел', 'Штаб-квартира', 'Центр управления', 'Пентхаус'],
   spaceport: ['Гараж', 'Мастерская', 'Сборочный цех', 'Ангар', 'Монтажный корпус', 'Центр полётов', 'Космоверфь'],
   oil: ['Сарай', 'Дизельная', 'Насосная', 'Буровая', 'Операторская', 'Диспетчерская', 'Нефтяное сердце'],
+  farm: ['Делянка', 'Грядка', 'Парник', 'Теплица', 'Оранжерея', 'Агроцех', 'Житница'],
 };
 
 const stagesOf = (theme: InteriorTheme): InteriorStage[] =>
@@ -101,6 +129,7 @@ export const INTERIOR_STAGES: Record<InteriorTheme, InteriorStage[]> = {
   corporation: stagesOf('corporation'),
   spaceport: stagesOf('spaceport'),
   oil: stagesOf('oil'),
+  farm: stagesOf('farm'),
 };
 
 /** Есть ли у темы свой интерьер (внутрь можно провалиться). */

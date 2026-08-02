@@ -1,26 +1,35 @@
 /**
- * 3D-главная во весь экран: большой светлый мир, по которому можно ездить
- * (перетаскивание/зум/наклон, OrbitControls). Зоны-станции расставлены по миру
- * и соединены дорогами; шахта и банк — 3D-модели, растущие по уровням зоны
- * (0..6, thresholds.ts). Тап по обычной станции открывает панель
- * (StationSheet), а тап по шахте или банку — проваливает внутрь: камера ныряет
- * в портал зоны и сцена сменяется на её интерьер (MineInterior/BankInterior) в
- * том же Canvas. Интерфейс приложения плавает стеклом поверх (см. Map.tsx).
+ * 3D-главная во весь экран: СТАТИЧНАЯ карта-город. Созвон №6 — перетаскивание и
+ * зум убраны совсем: они и были главным источником лагов, а освободившийся
+ * запас ушёл в детализацию и свет. Кадр подбирается так, чтобы весь город
+ * целиком помещался на экран при любом соотношении сторон (см. FitCamera).
+ *
+ * Композиция — «город», а не «тропинка» (см. City.tsx): в центре площадь с
+ * РАТУШЕЙ (главный крупный объект, растёт от суммы часов по всем станциям),
+ * вокруг — шесть мест под станции в трёх планах, от площади к ним идут улицы.
+ * Свободные места занимает пустырь под застройку, поэтому и с одной станцией
+ * карта выглядит городом.
+ *
+ * Тап по станции с интерьером проваливает внутрь: камера ныряет в портал зоны и
+ * сцена сменяется на её интерьер в том же Canvas. Интерфейс приложения плавает
+ * стеклом поверх (см. Map.tsx).
  */
 
-import { Suspense, useCallback, useEffect, useMemo, useRef } from 'react';
+import { Suspense, useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Environment, Html, Lightformer, MapControls, SoftShadows } from '@react-three/drei';
+import { Environment, Html, Lightformer, PerformanceMonitor, SoftShadows } from '@react-three/drei';
 import * as THREE from 'three';
 import type { Category } from '../api';
 import { formatDuration } from '../lib/format';
 import { categoryColor } from '../lib/palette';
-import { getZoneLevel, hasInterior, type InteriorTheme } from '../lib/thresholds';
+import { getTownLevel, getZoneLevel, hasInterior, type InteriorTheme } from '../lib/thresholds';
 import { Terrain, GRASS_Y } from './Island';
 import { Bank3D } from './Bank3D';
 import { BankInterior } from './BankInterior';
 import { Corp3D } from './Corp3D';
 import { CorpInterior } from './CorpInterior';
+import { Farm3D } from './Farm3D';
+import { FarmInterior } from './FarmInterior';
 import { Mine3D } from './Mine3D';
 import { MineInterior } from './MineInterior';
 import { Oil3D } from './Oil3D';
@@ -29,7 +38,9 @@ import { Space3D } from './Space3D';
 import { SpaceInterior } from './SpaceInterior';
 import { StationSign } from './Props3D';
 import { Character3D } from './Character3D';
-import { buildPath, stationLayout, WindingPath } from './Path';
+import { TownHall } from './TownHall';
+import { CityPavement, VacantLot } from './City';
+import { CITY_AZIM, CITY_HALF_F, CITY_HALF_U, CITY_SLOTS, TOWN_CENTER } from './cityLayout';
 
 /** Что показываем: карту, нырок в зону, её интерьер или подъём наружу. */
 export type SceneView = 'map' | 'dive' | 'inside' | 'rise';
@@ -44,7 +55,8 @@ export type SceneView = 'map' | 'dive' | 'inside' | 'rise';
  * уровне табличка висит в небе, а на шестом оказывается на середине башни.
  *
  * portal — смещение точки нырка от центра станции: у шахты это очаг входа, у
- * банка дверь на фасаде, у космопорта ворота ангара, у нефтевышки устье скважины.
+ * банка дверь на фасаде, у космопорта ворота ангара, у нефтевышки устье скважины,
+ * у фермы — ворота амбара.
  */
 const ZONE_3D: Record<
   InteriorTheme,
@@ -91,75 +103,66 @@ const ZONE_3D: Record<
     labelY: (lvl) => 1.3 + lvl * 0.34,
     portal: [0.05, 0.42, 0.22],
   },
+  farm: {
+    Model: Farm3D,
+    Interior: FarmInterior,
+    scale: 0.74,
+    labelY: () => 2.1,
+    portal: [0.4, 0.5, 0.55],
+  },
 };
 
 const DEG = Math.PI / 180;
 /** Обзорный кадр: наклон, поворот и угол зрения камеры карты. */
-const CAM_FOV = 55;
-const CAM_ELEV = 48 * DEG;
-const CAM_AZIM = 18 * DEG;
-/** Доля высоты экрана, свободная под мир (сверху сводка, снизу подсказка и таб-бар). */
-const WORLD_BAND = 0.62;
+const CAM_FOV = 52;
+const CAM_ELEV = 46 * DEG;
+const CAM_AZIM = CITY_AZIM;
+/** Доля высоты экрана, отданная городу (сверху сводка, снизу таб-бар). */
+const WORLD_BAND = 0.74;
 
 /**
- * Кадр карты: камера отъезжает ровно настолько, чтобы в него попали ВСЕ станции
- * сразу — и по ширине экрана, и по глубине. Иначе на телефоне (узкий кадр:
- * ~12 юнитов в ширину против тридцати с лишним в глубину) видно одну станцию, и
- * до остальных надо долго тащить карту — а значит, нельзя выбрать категорию.
+ * Кадр статичной карты. Считается по НЕИЗМЕННЫМ габаритам города, а не по
+ * набору категорий: карта больше не ездит, и кадр не должен прыгать от того,
+ * сколько станций у человека сегодня. Отступы:
+ *   • по ширине — половина станции плюс её подпись (подпись рисуется постоянным
+ *     размером в пикселях, у крайней станции её обрезало краем экрана);
+ *   • по глубине — модель ратуши и высокие станции, которые уходят вверх.
  */
-function fitFrame(points: [number, number][]) {
-  const xs = points.length ? points.map((p) => p[0]) : [0];
-  const zs = points.length ? points.map((p) => p[1]) : [0];
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minZ = Math.min(...zs);
-  const maxZ = Math.max(...zs);
-  const center: [number, number] = [(minX + maxX) / 2, (minZ + maxZ) / 2];
-  // Габариты считаем в осях камеры, а не мира: она повёрнута на CAM_AZIM, и по
-  // осям мира ширина выходит меньше настоящей — крайняя станция уезжала за край.
-  // u — вправо по экрану, v — в глубину.
-  const cosA = Math.cos(CAM_AZIM);
-  const sinA = Math.sin(CAM_AZIM);
-  let maxU = 0;
-  let maxV = 0;
-  for (const [x, z] of points.length ? points : ([[0, 0]] as [number, number][])) {
-    const dx = x - center[0];
-    const dz = z - center[1];
-    maxU = Math.max(maxU, Math.abs(dx * cosA - dz * sinA));
-    maxV = Math.max(maxV, Math.abs(-dx * sinA - dz * cosA));
-  }
-  // Станция — точка, а модель с подписью занимают вокруг неё ещё пару юнитов.
-  // Запас по ширине больше, чем по глубине: подпись рисуется постоянным
-  // размером в пикселях, и у крайней станции её обрезало правым краем экрана.
-  const halfW = maxU + 3.8;
-  const halfD = maxV + 2.6;
-  const aspect =
-    typeof window === 'undefined' ? 0.5 : Math.max(0.4, window.innerWidth / window.innerHeight);
+function fitFrame(aspect: number) {
+  const halfW = CITY_HALF_U + 1.75;
+  const halfD = CITY_HALF_F + 1.9;
   const tanV = Math.tan((CAM_FOV / 2) * DEG);
-  const byWidth = halfW / (tanV * aspect);
+  const byWidth = halfW / (tanV * Math.max(0.35, aspect));
   const byDepth = ((halfD / WORLD_BAND) * Math.sin(CAM_ELEV)) / tanV;
-  const dist = Math.min(42, Math.max(9, Math.max(byWidth, byDepth)));
+  const dist = Math.min(40, Math.max(9, Math.max(byWidth, byDepth)));
   const pos: [number, number, number] = [
-    center[0] + dist * Math.cos(CAM_ELEV) * Math.sin(CAM_AZIM),
+    TOWN_CENTER[0] + dist * Math.cos(CAM_ELEV) * Math.sin(CAM_AZIM),
     dist * Math.sin(CAM_ELEV),
-    center[1] + dist * Math.cos(CAM_ELEV) * Math.cos(CAM_AZIM),
+    TOWN_CENTER[1] + dist * Math.cos(CAM_ELEV) * Math.cos(CAM_AZIM),
   ];
-  return { pos, center, dist };
+  return { pos, dist };
 }
 
-/** Раскладка мира: путь, станции на нём и обзорный кадр камеры. */
-interface Layout {
-  curve: THREE.CatmullRomCurve3;
-  placed: Category[];
-  mineIndex: number;
-  posOf: (catIndex: number) => [number, number];
-  frame: ReturnType<typeof fitFrame>;
-}
+/** Кадр по умолчанию — для первой отрисовки Canvas до того, как известен размер. */
+const INITIAL_FRAME = fitFrame(
+  typeof window === 'undefined' ? 0.46 : window.innerWidth / Math.max(1, window.innerHeight),
+);
 
-/** Сохранённая поза камеры карты — чтобы вернуться ровно туда, откуда нырнули. */
-interface SavedPose {
-  pos: THREE.Vector3;
-  target: THREE.Vector3;
+/**
+ * Держит камеру карты в обзорном кадре: пересчитывает её при изменении размера
+ * холста (поворот телефона, ресайз окна). Никаких контролов — карта статична.
+ */
+function FitCamera({ enabled }: { enabled: boolean }) {
+  const camera = useThree((s) => s.camera);
+  const size = useThree((s) => s.size);
+  useEffect(() => {
+    if (!enabled) return;
+    const { pos } = fitFrame(size.width / Math.max(1, size.height));
+    camera.position.set(pos[0], pos[1], pos[2]);
+    camera.lookAt(TOWN_CENTER[0], 0.5, TOWN_CENTER[1]);
+    camera.updateProjectionMatrix();
+  }, [camera, size.width, size.height, enabled]);
+  return null;
 }
 
 interface HomeSceneProps {
@@ -167,7 +170,7 @@ interface HomeSceneProps {
   totals: Map<string, number>;
   activeCategoryId: string | null;
   onOpen: (id: string) => void;
-  /** Демо: принудительный уровень 3D-зон — шахты и банка (null = по часам). */
+  /** Демо: принудительный уровень 3D-зон (null = по часам). */
   levelOverride?: number | null;
   /** Режим сцены: карта / нырок / внутри зоны / подъём */
   view?: SceneView;
@@ -223,15 +226,10 @@ function Station({
           <meshBasicMaterial />
         </mesh>
       </group>
-      {/* Подпись — постоянного размера (без distanceFactor): в обзорном кадре
-          камера далеко, и масштабируемая подпись становится нечитаемой — а по
-          ней как раз и выбирают станцию. */}
-      <Html
-        position={[0, labelY, 0]}
-        center
-        zIndexRange={[10, 0]}
-        style={{ pointerEvents: 'none' }}
-      >
+      {/* Подпись — постоянного размера (без distanceFactor): камера стоит
+          далеко, и масштабируемая подпись становится нечитаемой — а по ней как
+          раз и выбирают станцию. */}
+      <Html position={[0, labelY, 0]} center zIndexRange={[10, 0]} style={{ pointerEvents: 'none' }}>
         {/* две строки, а не одна: в строку «Финансы · 34 ч 43 мин» табличка
             уезжала за край экрана у крайней станции */}
         <div
@@ -240,15 +238,18 @@ function Station({
             textAlign: 'center',
             background: '#fff',
             color: '#1f2937',
-            padding: '3px 10px 4px',
-            borderRadius: 14,
+            padding: '2px 8px 3px',
+            borderRadius: 12,
             boxShadow: '0 4px 14px rgba(0,0,0,.22)',
             fontFamily: 'Golos Text, sans-serif',
             lineHeight: 1.15,
+            // активная станция выделена ободком — видно, где идёт работа
+            outline: active ? '2px solid #a3e635' : 'none',
+            outlineOffset: 1,
           }}
         >
-          <div style={{ fontWeight: 600, fontSize: 13 }}>{cat.name}</div>
-          <div style={{ fontSize: 11, color: '#6b7280' }}>{formatDuration(seconds)}</div>
+          <div style={{ fontWeight: 600, fontSize: 12 }}>{cat.name}</div>
+          <div style={{ fontSize: 10, color: '#6b7280' }}>{formatDuration(seconds)}</div>
         </div>
       </Html>
     </group>
@@ -256,19 +257,11 @@ function Station({
 }
 
 /**
- * Нырок в шахту: камера разгоняясь летит ко входу-очагу и упирается в темноту
- * портала (сверху экран в это время затемняется — см. Map.tsx). Перед стартом
- * запоминает позу камеры карты, чтобы на возврате поставить её обратно.
+ * Нырок в зону: камера разгоняясь летит ко входу и упирается в темноту портала
+ * (сверху экран в это время затемняется — см. Map.tsx). Обратно возвращать её
+ * не нужно: карта статична, и на возврате FitCamera ставит тот же обзорный кадр.
  */
-function DiveRig({
-  active,
-  portal,
-  poseRef,
-}: {
-  active: boolean;
-  portal: [number, number, number];
-  poseRef: React.MutableRefObject<SavedPose | null>;
-}) {
+function DiveRig({ active, portal }: { active: boolean; portal: [number, number, number] }) {
   const { camera } = useThree();
   const t = useRef(0);
   const from = useRef<{ p: THREE.Vector3; q: THREE.Quaternion } | null>(null);
@@ -290,14 +283,6 @@ function DiveRig({
     }
     if (!from.current) {
       from.current = { p: camera.position.clone(), q: camera.quaternion.clone() };
-      // куда смотрела камера карты — пересечение взгляда с землёй
-      const dir = new THREE.Vector3();
-      camera.getWorldDirection(dir);
-      const dist = dir.y < -0.05 ? (0.4 - camera.position.y) / dir.y : 12;
-      poseRef.current = {
-        pos: camera.position.clone(),
-        target: camera.position.clone().addScaledVector(dir, Math.max(2, Math.min(40, dist))),
-      };
     }
     t.current = Math.min(1, t.current + dt / 0.85);
     const k = t.current * t.current; // разгон внутрь
@@ -309,37 +294,36 @@ function DiveRig({
 }
 
 /**
- * Темп теней: карта теней перерисовывается не каждый кадр, а каждый третий.
- * Мир статичный, а у живого (персонаж, вагонетки) тень обновляется ~20 раз в
- * секунду — на глаз не отличить. Теневой проход занимал больше половины всей
- * отрисовки кадра, так что это самая дешёвая экономия из возможных.
+ * Темп теней. Карта СТАТИЧНА: камера не двигается, мир не двигается — теневую
+ * карту можно не перерисовывать каждый кадр. Живого на ней мало (персонаж,
+ * вагонетки, крылья мельницы), так что раз в четыре кадра на глаз не отличить,
+ * а теневой проход занимал больше половины времени отрисовки. Это и есть та
+ * экономия, за счёт которой вернулись тени и мелкие детали.
  */
-/** Полное разрешение карты и пониженное — на время жеста. */
+/** Полное разрешение отрисовки на этом экране (Retina ограничиваем двойкой). */
 const FULL_DPR = typeof window === 'undefined' ? 1 : Math.min(window.devicePixelRatio || 1, 2);
-const DRAG_DPR = FULL_DPR * 0.6;
 
 /**
- * Пока карту тащат или зумят, рисуем в 0.6 разрешения: в движении разницы не
- * видно, а пикселей вчетверо меньше — а именно на них и уходит время (мягкие
- * тени считаются на каждый пиксель). Через четверть секунды после остановки
- * возвращаем полное качество, чтобы разглядывать мир было не на что жаловаться.
+ * Качество по факту, а не по догадке. Мягкие тени считаются НА КАЖДЫЙ ПИКСЕЛЬ,
+ * поэтому разрешение отрисовки — самый прямой рычаг цены кадра. На мощном
+ * телефоне рисуем в полном (картинка не страдает — Тимур просил не экономить
+ * на ней), а если устройство не тянет и кадры проседают, разрешение
+ * опускается; когда отпустило — возвращается. Постоянно резать качество ради
+ * слабых устройств нельзя, а вот отдавать его им по мере надобности — можно.
  */
-function useDragQuality() {
+function AdaptiveQuality() {
   const setDpr = useThree((s) => s.setDpr);
-  const restore = useRef(0);
-  useEffect(() => () => window.clearTimeout(restore.current), []);
-  const onStart = useCallback(() => {
-    window.clearTimeout(restore.current);
-    setDpr(DRAG_DPR);
-  }, [setDpr]);
-  const onEnd = useCallback(() => {
-    window.clearTimeout(restore.current);
-    restore.current = window.setTimeout(() => setDpr(FULL_DPR), 250);
-  }, [setDpr]);
-  return { onStart, onEnd };
+  return (
+    <PerformanceMonitor
+      onIncline={() => setDpr(FULL_DPR)}
+      onDecline={() => setDpr(Math.max(1, FULL_DPR * 0.7))}
+      flipflops={3}
+      onFallback={() => setDpr(1)}
+    />
+  );
 }
 
-function ShadowPacer({ every = 3 }: { every?: number }) {
+function ShadowPacer({ every = 4 }: { every?: number }) {
   const frame = useRef(0);
   useFrame((state) => {
     const shadows = state.gl.shadowMap;
@@ -350,23 +334,11 @@ function ShadowPacer({ every = 3 }: { every?: number }) {
   return null;
 }
 
-/** Возврат из шахты: ставит камеру карты туда, откуда ныряли. */
-function PoseKeeper({ poseRef }: { poseRef: React.MutableRefObject<SavedPose | null> }) {
-  const camera = useThree((s) => s.camera);
-  // MapControls (makeDefault) — нужен его target, иначе камера смотрит не туда
-  const controls = useThree((s) => s.controls) as unknown as
-    | { target: THREE.Vector3; update: () => void }
-    | null;
-  const done = useRef(false);
-  useEffect(() => {
-    const p = poseRef.current;
-    if (done.current || !p || !controls) return;
-    camera.position.copy(p.pos);
-    controls.target.copy(p.target);
-    controls.update();
-    done.current = true;
-  }, [camera, controls, poseRef]);
-  return null;
+/** Раскладка города: какая категория на каком месте и какие места свободны. */
+interface Layout {
+  placed: Category[];
+  posOf: (catIndex: number) => [number, number];
+  freeSlots: [number, number][];
 }
 
 function SceneContents({
@@ -377,51 +349,57 @@ function SceneContents({
   view = 'map',
   insideId,
   insideTheme = 'mine',
-  poseRef,
   layout,
-}: HomeSceneProps & { poseRef: React.MutableRefObject<SavedPose | null>; layout: Layout }) {
-  const { curve, placed, mineIndex, posOf, frame } = layout;
-  // на время жеста роняем разрешение и возвращаем его в покое
-  const quality = useDragQuality();
+  townLevel,
+}: HomeSceneProps & {
+  layout: Layout;
+  townLevel: number;
+}) {
+  const { placed, posOf, freeSlots } = layout;
   const activeIndex = placed.findIndex((c) => c.id === activeCategoryId);
-  const restIndex = mineIndex >= 0 ? mineIndex : 0;
-  const charSpot = placed.length ? posOf(activeIndex >= 0 ? activeIndex : restIndex) : ([0, 0] as [number, number]);
-  // Ныряем в ТУ станцию, по которой тапнули, и целимся в её вход: у каждой зоны
-  // он свой (см. ZONE_3D) — очаг шахты, дверь банка, ворота ангара, устье скважины.
+  // Герой стоит у активной станции, а без работы — на площади у ратуши. Смещение
+  // разное: у станции он выходит из-за её края, а на площади встаёт слева от
+  // фонтана (фонтан стоит справа-спереди от ратуши, и иначе герой был бы в воде).
+  const atStation = activeIndex >= 0;
+  const base = atStation ? posOf(activeIndex) : TOWN_CENTER;
+  const charSpot: [number, number] = atStation
+    ? [base[0] + 1.35, base[1] + 1.35]
+    : [base[0] - 1.5, base[1] + 1.55];
+  // Ныряем в ТУ станцию, по которой тапнули, и целимся в её вход
   const diveIndex = insideId ? placed.findIndex((c) => c.id === insideId) : -1;
-  const diveSpot = placed.length ? posOf(diveIndex >= 0 ? diveIndex : restIndex) : ([0, 0] as [number, number]);
+  const diveSpot = diveIndex >= 0 ? posOf(diveIndex) : TOWN_CENTER;
   const [px, py, pz] = ZONE_3D[insideTheme].portal;
   const portal: [number, number, number] = [diveSpot[0] + px, GRASS_Y + py, diveSpot[1] + pz];
 
   return (
     <>
       <color attach="background" args={['#bfe6ff']} />
-      <fog attach="fog" args={['#cdeeff', 30, 58]} />
+      <fog attach="fog" args={['#cdeeff', 34, 64]} />
 
-      {/* мягкие полутени (реалистичнее, чем жёсткие карты теней). samples —
-          сколько раз шейдер опрашивает карту теней на каждый пиксель: 6 хватает
-          для той же мягкости, а стоит вдвое дешевле двенадцати */}
-      <SoftShadows size={14} samples={6} focus={0.7} />
+      {/* Мягкие полутени. Карта статична, поэтому качество теней подняли:
+          samples 10 вместо 6 — полутень мягче и чище, а платим за это тем, что
+          освободилось от выключенного перетаскивания. */}
+      <SoftShadows size={16} samples={10} focus={0.75} />
 
-      <hemisphereLight args={['#dcefff', '#6b8a54', 0.55]} />
-      <ambientLight intensity={0.35} />
+      <hemisphereLight args={['#dcefff', '#6b8a54', 0.5]} />
+      <ambientLight intensity={0.32} />
       <directionalLight
-        position={[10, 15, 8]}
-        intensity={1.7}
+        position={[11, 16, 9]}
+        intensity={1.8}
         color="#fff1d0"
         castShadow
-        shadow-mapSize-width={1024}
-        shadow-mapSize-height={1024}
+        shadow-mapSize-width={2048}
+        shadow-mapSize-height={2048}
         shadow-bias={-0.0004}
         shadow-camera-near={0.5}
-        shadow-camera-far={60}
-        shadow-camera-left={-18}
-        shadow-camera-right={18}
-        shadow-camera-top={18}
-        shadow-camera-bottom={-18}
+        shadow-camera-far={70}
+        shadow-camera-left={-14}
+        shadow-camera-right={14}
+        shadow-camera-top={14}
+        shadow-camera-bottom={-14}
       />
       {/* холодная подсветка с теневой стороны — объём */}
-      <directionalLight position={[-8, 6, -6]} intensity={0.35} color="#bcd8ff" />
+      <directionalLight position={[-9, 7, -7]} intensity={0.38} color="#bcd8ff" />
 
       {/* мягкое студийное окружение в самой сцене (без загрузки HDR) —
           даёт матовым материалам реалистичный «глиняный» отлив и блики */}
@@ -433,9 +411,12 @@ function SceneContents({
       </Environment>
 
       <Terrain />
+      <CityPavement />
 
-      {/* извилистая мощёная дорога-змейка через все станции */}
-      <WindingPath curve={curve} />
+      {/* Ратуша — главный объект в центре кадра */}
+      <group position={[TOWN_CENTER[0], GRASS_Y, TOWN_CENTER[1]]} scale={0.92}>
+        <TownHall level={levelOverride ?? townLevel} active={activeIndex >= 0} />
+      </group>
 
       {placed.map((cat, i) => (
         <Station
@@ -449,46 +430,38 @@ function SceneContents({
         />
       ))}
 
-      <group position={[charSpot[0] + 1.2, GRASS_Y, charSpot[1] + 1.2]} rotation={[0, -0.6, 0]}>
-        <Character3D working={activeIndex >= 0} scale={0.8} />
+      {/* Свободные места: размеченный участок под застройку, а не дыра в городе */}
+      {freeSlots.map(([x, z], i) => (
+        <group key={`lot-${i}`} position={[x, GRASS_Y, z]} scale={0.8}>
+          <VacantLot />
+        </group>
+      ))}
+
+      <group position={[charSpot[0], GRASS_Y, charSpot[1]]} rotation={[0, atStation ? -0.6 : 0.5, 0]}>
+        <Character3D working={atStation} scale={0.85} />
       </group>
 
-      {/* MapControls: тащишь пальцем = едешь по карте вдоль дороги, щипок = зум
-          к любой станции, два пальца = поворот. Не «кручение вокруг точки».
-          На нырке управление отключено — камерой рулит DiveRig. */}
-      <MapControls
-        target={[frame.center[0], 0.4, frame.center[1]]}
-        enabled={view === 'map'}
-        enableDamping
-        dampingFactor={0.16}
-        onStart={quality.onStart}
-        onEnd={quality.onEnd}
-        minDistance={2.5}
-        maxDistance={frame.dist + 8}
-        minPolarAngle={0.3}
-        maxPolarAngle={1.35}
-        makeDefault
-      />
-
-      <PoseKeeper poseRef={poseRef} />
-      <DiveRig active={view === 'dive'} portal={portal} poseRef={poseRef} />
+      <FitCamera enabled={view === 'map'} />
+      <DiveRig active={view === 'dive'} portal={portal} />
     </>
   );
 }
 
 export function HomeScene(props: HomeSceneProps) {
-  const { view = 'map', insideTheme = 'mine', insideLevel = 0, insideActive = false, categories } = props;
-  // Раскладка мира и обзорный кадр: считаем один раз на набор категорий —
-  // на старте в кадре все станции, дальше можно подъехать к любой.
+  const { view = 'map', insideTheme = 'mine', insideLevel = 0, insideActive = false, categories, totals } = props;
+  // Раскладка города: категории занимают места по порядку, остальные места
+  // остаются под застройку. Габариты кадра при этом не меняются — карта статична.
   const layout = useMemo<Layout>(() => {
-    const curve = buildPath();
-    const placed = categories.slice(0, 6);
-    const mineIndex = placed.findIndex((c) => c.theme === 'mine');
-    const posOf = stationLayout(curve, placed.length, mineIndex);
-    return { curve, placed, mineIndex, posOf, frame: fitFrame(placed.map((_, i) => posOf(i))) };
+    const placed = categories.slice(0, CITY_SLOTS.length);
+    const freeSlots = CITY_SLOTS.slice(placed.length);
+    return { placed, posOf: (i: number) => CITY_SLOTS[i] ?? TOWN_CENTER, freeSlots };
   }, [categories]);
-  // поза камеры карты переживает уход в зону и обратно
-  const poseRef = useRef<SavedPose | null>(null);
+  // Ратуша растёт от суммы часов по всему городу
+  const townLevel = useMemo(() => {
+    let sum = 0;
+    for (const v of totals.values()) sum += v;
+    return getTownLevel(sum);
+  }, [totals]);
   // мир карты живёт на карте и во время нырка, интерьер — внутри и на подъёме
   const showMap = view === 'map' || view === 'dive';
   const Interior = ZONE_3D[insideTheme].Interior;
@@ -497,15 +470,18 @@ export function HomeScene(props: HomeSceneProps) {
     <Canvas
       shadows
       dpr={[1, 2]}
-      camera={{ position: layout.frame.pos, fov: CAM_FOV }}
+      camera={{ position: INITIAL_FRAME.pos, fov: CAM_FOV }}
       gl={{ antialias: true }}
-      style={{ touchAction: 'none' }}
+      // карта не двигается — жесты по холсту не перехватываем, страница живёт как обычно
+      style={{ touchAction: 'manipulation' }}
     >
       {/* тени пересчитываются реже, чем кадры — общее для карты и интерьеров */}
       <ShadowPacer />
+      {/* на слабом устройстве разрешение отрисовки опускается само */}
+      <AdaptiveQuality />
       <Suspense fallback={null}>
         {showMap ? (
-          <SceneContents {...props} poseRef={poseRef} layout={layout} />
+          <SceneContents {...props} layout={layout} townLevel={townLevel} />
         ) : (
           <Interior level={insideLevel} active={insideActive} />
         )}

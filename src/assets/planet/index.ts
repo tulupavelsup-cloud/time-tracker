@@ -1,6 +1,10 @@
 /**
- * Реестр ассетов планеты: тема (slug из themes.ts) -> Exterior/Interior.
- * Новая тема = новая папка с двумя компонентами + строка здесь.
+ * Реестр ПЛОСКИХ (SVG) ассетов планеты: тема (slug из themes.ts) ->
+ * Exterior/Interior. Это наследие первого визуала: сейчас у всех тем есть
+ * настоящие 3D-модели и 3D-интерьеры (src/three/*), и тап по станции ныряет
+ * внутрь, а не открывает панель. Плоские ассеты остались только для панели
+ * станции без темы (StationSheet), поэтому реестр НЕПОЛНЫЙ: у темы может не
+ * быть плоской пары — zoneAssets отдаст запасную.
  */
 
 import type { ComponentType } from 'react';
@@ -21,7 +25,7 @@ export interface ZoneAssets {
   Interior: ComponentType<{ level: number; active: boolean }>;
 }
 
-export const PLANET_ASSETS: Record<ThemeSlug, ZoneAssets> = {
+export const PLANET_ASSETS: Partial<Record<ThemeSlug, ZoneAssets>> = {
   mine: { Exterior: MineExterior, Interior: MineInterior },
   corporation: { Exterior: CorpExterior, Interior: CorpInterior },
   spaceport: { Exterior: SpaceExterior, Interior: SpaceInterior },
@@ -29,7 +33,7 @@ export const PLANET_ASSETS: Record<ThemeSlug, ZoneAssets> = {
   bank: { Exterior: BankExterior, Interior: BankInterior },
 };
 
-/** Ассеты темы с запасным вариантом (первая тема), если slug неизвестен. */
+/** Ассеты темы с запасным вариантом (шахта), если плоской пары у темы нет. */
 export function zoneAssets(theme: ThemeSlug | string | null | undefined): ZoneAssets {
-  return PLANET_ASSETS[(theme ?? 'mine') as ThemeSlug] ?? PLANET_ASSETS.mine;
+  return PLANET_ASSETS[(theme ?? 'mine') as ThemeSlug] ?? { Exterior: MineExterior, Interior: MineInterior };
 }

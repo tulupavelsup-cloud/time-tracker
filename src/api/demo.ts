@@ -6,6 +6,7 @@
 
 import type { User } from '@supabase/supabase-js';
 import { dayBounds, dayKey } from '../lib/day';
+import { MAX_CATEGORIES } from '../lib/themes';
 import {
   clipSpan,
   fillFromEnd,
@@ -71,13 +72,14 @@ function task(id: string, categoryId: string, name: string): Task {
   };
 }
 
-// Разные темы и разные уровни зон: ~0.5 ч / 2 ч / 10 ч / 35 ч
+// Все шесть тем и разные уровни зон: от пустыря до «Империи»
 const categories: Category[] = [
   cat('c-mine', 'Саморазвитие', '#22c55e', 'mine'),
   cat('c-corp', 'Школа', '#3b82f6', 'corporation'),
   cat('c-space', 'Проекты', '#8b5cf6', 'spaceport'),
   cat('c-bank', 'Финансы', '#eab308', 'bank'),
   cat('c-oil', 'Спорт', '#ef4444', 'oil'),
+  cat('c-farm', 'Здоровье', '#14b8a6', 'farm'),
 ];
 
 const tasks: Task[] = [
@@ -134,6 +136,11 @@ seed('c-bank', 't-invest', 9, 15, 270);
 seed('c-bank', null, 12, 11, 350);
 seed('c-bank', 't-crypto', 18, 13, 400);
 seed('c-bank', null, 25, 10, 300);
+// Здоровье (ферма): ~7 ч — «Бизнес»
+seed('c-farm', null, 1, 18, 60);
+seed('c-farm', null, 3, 7, 90);
+seed('c-farm', null, 8, 19, 120);
+seed('c-farm', null, 15, 8, 150);
 
 const delay = <T,>(v: T): Promise<T> => new Promise((r) => setTimeout(() => r(v), 60));
 
@@ -167,6 +174,12 @@ export async function createCategory(
   icon?: string | null,
   theme?: ThemeSlug | null,
 ): Promise<Category> {
+  // тот же лимит, что и в бою: мест на карте шесть
+  if (categories.filter((x) => !x.archived).length >= MAX_CATEGORIES) {
+    throw new Error(
+      'На карте шесть мест под станции — все заняты. Чтобы завести новую категорию, отправьте одну из старых в архив.',
+    );
+  }
   const c: Category = {
     id: uid('c'),
     user_id: DEMO_USER_ID,
@@ -184,6 +197,11 @@ export async function createCategory(
 export async function updateCategory(id: string, patch: CategoryUpdate): Promise<Category> {
   const c = categories.find((x) => x.id === id);
   if (!c) throw new Error('updateCategory: категория не найдена');
+  if (patch.archived === false && categories.filter((x) => !x.archived).length >= MAX_CATEGORIES) {
+    throw new Error(
+      'На карте шесть мест под станции — все заняты. Чтобы завести новую категорию, отправьте одну из старых в архив.',
+    );
+  }
   Object.assign(c, patch);
   return delay({ ...c });
 }
@@ -235,6 +253,20 @@ export async function getLastSession(): Promise<Session | null> {
     .filter((s) => s.ended_at !== null)
     .sort((a, b) => (a.ended_at! < b.ended_at! ? 1 : -1));
   return delay(done[0] ?? null);
+}
+
+/** Та же защита от забытого таймера, что и в бою (см. api/sessions.ts). */
+export async function closeStaleSession(nowMs: number = Date.now()): Promise<Session | null> {
+  const active = sessions.find((s) => s.ended_at === null);
+  if (!active) return delay(null);
+  const startedMs = new Date(active.started_at).getTime();
+  const midnight = new Date(startedMs);
+  midnight.setHours(0, 0, 0, 0);
+  midnight.setDate(midnight.getDate() + 1);
+  if (midnight.getTime() > nowMs) return delay(null);
+  active.ended_at = midnight.toISOString();
+  active.duration_seconds = Math.max(0, Math.round((midnight.getTime() - startedMs) / 1000));
+  return delay({ ...active });
 }
 
 export async function stopSession(): Promise<Session | null> {

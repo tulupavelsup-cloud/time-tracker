@@ -23,7 +23,7 @@ import {
   type ThemeSlug,
 } from '../api';
 import { CATEGORY_COLORS, DEFAULT_CATEGORY_COLOR, categoryColor } from '../lib/palette';
-import { THEMES, getTheme, suggestTheme } from '../lib/themes';
+import { MAX_CATEGORIES, THEMES, getTheme, suggestTheme } from '../lib/themes';
 import { getZoneLevel } from '../lib/thresholds';
 import { formatDuration } from '../lib/format';
 import { errorText, useToast } from '../ui/Toast';
@@ -87,7 +87,11 @@ export function CategoriesScreen() {
     return map;
   }, [tasks]);
 
+  /** Свободно ли ещё место на карте: станций там ровно шесть (созвон №6). */
+  const full = categories.length >= MAX_CATEGORIES;
+
   function openCreate() {
+    if (full) return;
     setForm({
       id: null,
       name: '',
@@ -205,16 +209,25 @@ export function CategoriesScreen() {
       animate="show"
       variants={{ hidden: {}, show: { transition: { staggerChildren: 0.06 } } }}
     >
-      <motion.button
-        type="button"
-        variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}
-        whileTap={{ scale: 0.96 }}
-        onClick={openCreate}
-        className="flex w-full items-center justify-center gap-2 rounded-3xl bg-lime-300 py-3.5 font-display text-sm font-medium text-emerald-950 shadow-lg"
-      >
-        <PlusIcon />
-        Новая категория
-      </motion.button>
+      <motion.div variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}>
+        <motion.button
+          type="button"
+          whileTap={full ? undefined : { scale: 0.96 }}
+          disabled={full}
+          onClick={openCreate}
+          className="flex w-full items-center justify-center gap-2 rounded-3xl bg-lime-300 py-3.5 font-display text-sm font-medium text-emerald-950 shadow-lg disabled:opacity-45 disabled:shadow-none"
+        >
+          <PlusIcon />
+          Новая категория
+        </motion.button>
+        {/* Мест на карте ровно шесть — говорим об этом сразу, а не отказом
+            после того, как человек придумал название и выбрал цвет. */}
+        <p className="mt-1.5 px-1 text-center text-[11px] text-white/80 drop-shadow">
+          {full
+            ? `Все ${MAX_CATEGORIES} мест на карте заняты. Отправьте станцию в архив — место освободится.`
+            : `Занято ${categories.length} из ${MAX_CATEGORIES} мест на карте.`}
+        </p>
+      </motion.div>
 
       {categories.length === 0 && (
         <div className="glass-dark p-6 text-center text-sm text-white/65">
