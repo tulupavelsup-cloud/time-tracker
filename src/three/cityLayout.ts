@@ -25,7 +25,7 @@ export const CITY_AZIM = 18 * (Math.PI / 180);
  * БЛИЖЕ к зрителю, вниз по экрану; минус — вглубь, к горизонту). Перевод в мир
  * — азимутом камеры.
  */
-function spot(u: number, f: number): [number, number] {
+export function spot(u: number, f: number): [number, number] {
   const c = Math.cos(CITY_AZIM);
   const s = Math.sin(CITY_AZIM);
   return [u * c + f * s, -u * s + f * c];

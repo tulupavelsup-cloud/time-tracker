@@ -18,7 +18,8 @@ import { chain, Layer, type Placed } from './Instanced';
 const GRASS_Y = 0;
 
 /** Компактный детерминированный ГПСЧ (mulberry32) — стабильная раскладка декора. */
-function rng(seed: number) {
+// eslint-disable-next-line react-refresh/only-export-components
+export function rng(seed: number) {
   let a = seed >>> 0;
   return () => {
     a |= 0;
@@ -236,103 +237,239 @@ export function scatterPebbles(position: [number, number, number], seed = 1): St
 
 /* ─────────────────────────── Деревья ─────────────────────────── */
 
-/** Лиственное дерево: ствол + большая округлая крона с шапками поменьше. */
-export function TreeField({ items }: { items: { x: number; z: number; scale: number }[] }) {
+/**
+ * Дерево в лесу: где стоит, какого размера, как повёрнуто и какого оттенка
+ * зелени. Поворот и оттенок нужны, чтобы плотный лес не выглядел копипастой
+ * одного дерева — на референсе соседние ёлки заметно отличаются и цветом, и
+ * разворотом граней.
+ */
+export interface TreeSpec {
+  x: number;
+  z: number;
+  scale: number;
+  rot?: number;
+  /** Индекс палитры кроны (берётся по модулю — можно передавать любое число) */
+  tone?: number;
+}
+
+/**
+ * Лиственное дерево: ствол + гранёная крона из нескольких глыб. Гранёная
+ * (flatShading икосаэдр), а не гладкий шар: на референсе у крон читаются
+ * крупные плоскости со своим оттенком — именно это и даёт «лоу-поли», а не
+ * пластиковый шарик.
+ */
+const TREE_TONES: string[][] = [
+  ['#3f8f2f', '#4a9e37', '#56ad41', '#357f28'],
+  ['#4c9a34', '#59ab3e', '#66ba49', '#42892d'],
+  ['#357c2b', '#3f8b33', '#4a9a3c', '#2e6f25'],
+];
+const TREE_BLOBS: { p: [number, number, number]; s: [number, number, number] }[] = [
+  { p: [0, 0, 0], s: [1, 0.9, 1] },
+  { p: [0.62, -0.2, 0.18], s: [0.62, 0.6, 0.62] },
+  { p: [-0.58, -0.14, -0.16], s: [0.64, 0.6, 0.64] },
+  { p: [0.12, 0.52, -0.08], s: [0.6, 0.58, 0.6] },
+  { p: [-0.1, -0.05, 0.6], s: [0.54, 0.52, 0.54] },
+];
+
+export function TreeField({ items }: { items: TreeSpec[] }) {
   const parts = useMemo(() => {
     const trunks: Placed[] = [];
     const crowns: Placed[] = [];
-    const puffs: Placed[] = [];
-    const shape: { p: [number, number, number]; s: number; c: string }[] = [
-      { p: [0.6, -0.1, 0.15], s: 0.6, c: '#57a53c' },
-      { p: [-0.55, -0.05, -0.12], s: 0.6, c: '#4a9333' },
-      { p: [0.1, 0.55, 0.05], s: 0.62, c: '#68bf49' },
-      { p: [0.16, 0.05, 0.55], s: 0.5, c: '#5fb542' },
-      { p: [-0.14, 0.05, -0.55], s: 0.5, c: '#4a9333' },
-    ];
     for (const t of items) {
-      const root = { p: [t.x, GRASS_Y, t.z] as [number, number, number], s: t.scale };
-      const top = { p: [0, 1.95, 0] as [number, number, number] };
-      trunks.push({ m: chain(root, { p: [0, 0.7, 0] }), c: '#8a5a33' });
-      crowns.push({ m: chain(root, top), c: '#4f9a37' });
-      for (const s of shape) puffs.push({ m: chain(root, top, { p: s.p, s: s.s }), c: s.c });
+      const root = {
+        p: [t.x, GRASS_Y, t.z] as [number, number, number],
+        r: [0, t.rot ?? 0, 0] as [number, number, number],
+        s: t.scale,
+      };
+      const tone = TREE_TONES[Math.abs(Math.round(t.tone ?? 0)) % TREE_TONES.length];
+      trunks.push({ m: chain(root, { p: [0, 0.72, 0] }), c: '#7d5230' });
+      TREE_BLOBS.forEach((b, i) => {
+        crowns.push({
+          m: chain(root, { p: [0, 1.95, 0] }, { p: b.p, r: [i * 0.7, i * 1.1, i * 0.4], s: b.s }),
+          c: tone[i % tone.length],
+        });
+      });
     }
-    return { trunks, crowns, puffs };
+    return { trunks, crowns };
   }, [items]);
   return (
     <group>
-      <Layer items={parts.trunks} castShadow>
-        <cylinderGeometry args={[0.18, 0.26, 1.4, 12]} />
-        <meshStandardMaterial roughness={1} />
+      <Layer items={parts.trunks} castShadow receiveShadow>
+        <cylinderGeometry args={[0.17, 0.25, 1.44, 9]} />
+        <meshStandardMaterial roughness={1} flatShading />
       </Layer>
-      <Layer items={parts.crowns} castShadow>
-        <sphereGeometry args={[0.95, 22, 18]} />
-        <meshStandardMaterial roughness={1} />
-      </Layer>
-      <Layer items={parts.puffs} castShadow>
-        <sphereGeometry args={[1, 18, 16]} />
-        <meshStandardMaterial roughness={1} />
-      </Layer>
-    </group>
-  );
-}
-
-/** Ёлки «лоу-поли»: ствол + 3 конуса стопкой (как в деревенском референсе). */
-export function ConiferField({ items }: { items: { x: number; z: number; scale: number }[] }) {
-  const parts = useMemo(() => {
-    const trunks: Placed[] = [];
-    const cones: Placed[] = [];
-    const tiers: { y: number; r: number; h: number; c: string }[] = [
-      { y: 0.7, r: 0.62, h: 0.9, c: '#2f7d3f' },
-      { y: 1.15, r: 0.5, h: 0.8, c: '#348a45' },
-      { y: 1.6, r: 0.36, h: 0.7, c: '#3d9950' },
-    ];
-    for (const t of items) {
-      const root = { p: [t.x, GRASS_Y, t.z] as [number, number, number], s: t.scale };
-      trunks.push({ m: chain(root, { p: [0, 0.2, 0] }), c: '#6f4a2c' });
-      for (const tier of tiers) {
-        cones.push({ m: chain(root, { p: [0, tier.y, 0], s: [tier.r, tier.h, tier.r] }), c: tier.c });
-      }
-    }
-    return { trunks, cones };
-  }, [items]);
-  return (
-    <group>
-      <Layer items={parts.trunks} castShadow>
-        <cylinderGeometry args={[0.1, 0.14, 0.4, 8]} />
-        <meshStandardMaterial roughness={1} />
-      </Layer>
-      <Layer items={parts.cones} castShadow>
-        <coneGeometry args={[1, 1, 8]} />
+      <Layer items={parts.crowns} castShadow receiveShadow>
+        <icosahedronGeometry args={[0.95, 1]} />
         <meshStandardMaterial roughness={1} flatShading />
       </Layer>
     </group>
   );
 }
 
-/** Круглые кустики. */
-export function BushField({ items }: { items: { x: number; z: number; scale: number }[] }) {
+/**
+ * Ёлка — главное дерево референса: высокая, стройная, из четырёх конусов
+ * стопкой, к макушке светлее. Четыре яруса вместо трёх и вытянутый силуэт: на
+ * референсе ёлки заметно выше домов и держат весь кадр рамкой.
+ */
+const CONIFER_TIERS: { y: number; r: number; h: number }[] = [
+  { y: 0.66, r: 0.70, h: 1.18 },
+  { y: 1.16, r: 0.57, h: 1.04 },
+  { y: 1.64, r: 0.44, h: 0.92 },
+  { y: 2.08, r: 0.30, h: 0.80 },
+];
+const CONIFER_TONES: string[][] = [
+  ['#1f5f2c', '#276e34', '#2f7d3c', '#388c45'],
+  ['#27692f', '#2f7838', '#378741', '#40964a'],
+  ['#18512a', '#1f6031', '#276f39', '#2f7e41'],
+  ['#2d7238', '#358141', '#3e904a', '#479f53'],
+];
+
+export function ConiferField({ items }: { items: TreeSpec[] }) {
+  const parts = useMemo(() => {
+    const trunks: Placed[] = [];
+    const cones: Placed[] = [];
+    for (const t of items) {
+      const root = {
+        p: [t.x, GRASS_Y, t.z] as [number, number, number],
+        r: [0, t.rot ?? 0, 0] as [number, number, number],
+        s: t.scale,
+      };
+      const tone = CONIFER_TONES[Math.abs(Math.round(t.tone ?? 0)) % CONIFER_TONES.length];
+      trunks.push({ m: chain(root, { p: [0, 0.22, 0] }), c: '#6b4626' });
+      CONIFER_TIERS.forEach((tier, i) => {
+        cones.push({
+          m: chain(root, { p: [0, tier.y, 0], r: [0, i * 0.4, 0], s: [tier.r, tier.h, tier.r] }),
+          c: tone[i % tone.length],
+        });
+      });
+    }
+    return { trunks, cones };
+  }, [items]);
+  return (
+    <group>
+      <Layer items={parts.trunks} castShadow>
+        <cylinderGeometry args={[0.1, 0.15, 0.44, 7]} />
+        <meshStandardMaterial roughness={1} />
+      </Layer>
+      <Layer items={parts.cones} castShadow receiveShadow>
+        <coneGeometry args={[1, 1, 7]} />
+        <meshStandardMaterial roughness={1} flatShading />
+      </Layer>
+    </group>
+  );
+}
+
+/** Круглые кустики — тоже гранёные, чтобы дружили с кронами. */
+export function BushField({ items }: { items: TreeSpec[] }) {
   const parts = useMemo(() => {
     const big: Placed[] = [];
     const small: Placed[] = [];
     for (const b of items) {
-      const root = { p: [b.x, GRASS_Y, b.z] as [number, number, number], s: b.scale };
-      big.push({ m: chain(root, { p: [0, 0.22, 0] }), c: '#54a53a' });
-      small.push({ m: chain(root, { p: [0.28, 0.16, 0.05] }), c: '#4c9a34' });
-      small.push({ m: chain(root, { p: [-0.24, 0.16, -0.05] }), c: '#61b545' });
+      const root = {
+        p: [b.x, GRASS_Y, b.z] as [number, number, number],
+        r: [0, b.rot ?? 0, 0] as [number, number, number],
+        s: b.scale,
+      };
+      big.push({ m: chain(root, { p: [0, 0.2, 0], s: [1, 0.85, 1] }), c: '#3f8f2d' });
+      small.push({ m: chain(root, { p: [0.28, 0.14, 0.05], s: [1, 0.85, 1] }), c: '#367f27' });
+      small.push({ m: chain(root, { p: [-0.24, 0.15, -0.06], s: [1, 0.85, 1] }), c: '#4a9e37' });
     }
     return { big, small };
   }, [items]);
   return (
     <group>
-      <Layer items={parts.big} castShadow>
-        <sphereGeometry args={[0.34, 16, 14]} />
-        <meshStandardMaterial roughness={1} />
+      <Layer items={parts.big} castShadow receiveShadow>
+        <icosahedronGeometry args={[0.34, 1]} />
+        <meshStandardMaterial roughness={1} flatShading />
       </Layer>
-      <Layer items={parts.small} castShadow>
-        <sphereGeometry args={[0.24, 14, 12]} />
+      <Layer items={parts.small} castShadow receiveShadow>
+        <icosahedronGeometry args={[0.24, 1]} />
+        <meshStandardMaterial roughness={1} flatShading />
+      </Layer>
+    </group>
+  );
+}
+
+/* ─────────────────────────── Овечки ─────────────────────────── */
+
+/**
+ * Овечки, пасущиеся по лугу, — живая мелочь референса. Шерсть гранёная и
+ * кремовая, мордочка и ноги тёмные. Всё поле — четыре слоя инстансов.
+ */
+export function SheepField({ items }: { items: { x: number; z: number; rot: number; scale?: number }[] }) {
+  const parts = useMemo(() => {
+    const wool: Placed[] = [];
+    const heads: Placed[] = [];
+    const legs: Placed[] = [];
+    for (const s of items) {
+      const k = s.scale ?? 1;
+      const root = {
+        p: [s.x, GRASS_Y, s.z] as [number, number, number],
+        r: [0, s.rot, 0] as [number, number, number],
+        s: k,
+      };
+      // туловище — три глыбы шерсти, чтобы силуэт был кучерявым
+      wool.push({ m: chain(root, { p: [0, 0.3, 0], s: [0.3, 0.26, 0.4] }), c: '#f4efe2' });
+      wool.push({ m: chain(root, { p: [0, 0.38, -0.1], r: [0.3, 0.5, 0], s: [0.22, 0.2, 0.24] }), c: '#fbf7ec' });
+      wool.push({ m: chain(root, { p: [-0.02, 0.28, 0.22], r: [0, 1.1, 0.4], s: [0.2, 0.18, 0.2] }), c: '#eae4d4' });
+      heads.push({ m: chain(root, { p: [0, 0.34, 0.42], r: [0.15, 0, 0], s: [0.13, 0.14, 0.16] }), c: '#5d564d' });
+      // ушки
+      heads.push({ m: chain(root, { p: [0.12, 0.4, 0.4], r: [0, 0, -0.6], s: [0.08, 0.04, 0.05] }), c: '#4f4941' });
+      heads.push({ m: chain(root, { p: [-0.12, 0.4, 0.4], r: [0, 0, 0.6], s: [0.08, 0.04, 0.05] }), c: '#4f4941' });
+      for (const [lx, lz] of [
+        [0.14, 0.2],
+        [-0.14, 0.2],
+        [0.14, -0.18],
+        [-0.14, -0.18],
+      ]) {
+        legs.push({ m: chain(root, { p: [lx, 0.09, lz] }), c: '#4f4941' });
+      }
+    }
+    return { wool, heads, legs };
+  }, [items]);
+  return (
+    <group>
+      <Layer items={parts.wool} castShadow receiveShadow>
+        <icosahedronGeometry args={[1, 1]} />
+        <meshStandardMaterial roughness={1} flatShading />
+      </Layer>
+      <Layer items={parts.heads} castShadow>
+        <icosahedronGeometry args={[1, 0]} />
+        <meshStandardMaterial roughness={0.9} flatShading />
+      </Layer>
+      <Layer items={parts.legs} castShadow>
+        <cylinderGeometry args={[0.035, 0.03, 0.18, 6]} />
         <meshStandardMaterial roughness={1} />
       </Layer>
     </group>
+  );
+}
+
+/* ─────────────────────────── Рельеф ─────────────────────────── */
+
+/**
+ * Пологие бугры под травой. На референсе земля не идеальная плоскость: по ней
+ * гуляют широкие мягкие волны, на которых свет ложится гранями. Бугор — сильно
+ * приплюснутый гранёный купол в цвет травы, тонет в земле краями.
+ */
+export function MoundField({
+  items,
+}: {
+  items: { x: number; z: number; rx: number; ry: number; rot: number; c: string }[];
+}) {
+  const placed = useMemo(
+    () =>
+      items.map((m) => ({
+        m: chain({ p: [m.x, GRASS_Y - m.ry * 0.42, m.z], r: [0, m.rot, 0], s: [m.rx, m.ry, m.rx] }),
+        c: m.c,
+      })),
+    [items],
+  );
+  return (
+    <Layer items={placed} receiveShadow castShadow>
+      <icosahedronGeometry args={[1, 1]} />
+      <meshStandardMaterial roughness={1} flatShading />
+    </Layer>
   );
 }
 

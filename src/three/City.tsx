@@ -1,18 +1,21 @@
 /**
- * Мостовые города и пустые места под станции (3D). Сама геометрия — где
- * площадь, где места, как идут улицы — лежит в cityLayout.ts; здесь только
- * отрисовка.
+ * Дороги города и пустые места под станции (3D). Сама геометрия — где площадь,
+ * где места, как идут улицы — лежит в cityLayout.ts; здесь только отрисовка.
+ *
+ * По референсу дороги ГРУНТОВЫЕ, а не мощёные: широкие тёплые песчаные ленты с
+ * мягкими краями и утоптанной серединой, по обочине — трава и камешки. Серая
+ * брусчатка, которая была тут раньше, выбивалась из картинки холодным пятном
+ * ровно в центре кадра.
  */
 
 import { memo, useMemo } from 'react';
 import { chain, Layer, type Placed } from './Instanced';
 import { PLAZA_R, STREETS, TOWN_CENTER } from './cityLayout';
+import { DIRT, DIRT_DARK, SAND as SAND_EDGE } from './worldPalette';
 
 const GRASS_Y = 0;
 
-const COBBLE = ['#c9c3b5', '#bcb6a7', '#d3cdbf', '#b3ac9d'];
-const PAVE_DARK = '#8f8672';
-const PAVE_SAND = '#cbb078';
+const PEBBLE = ['#c8bda6', '#b8ad96', '#d3c9b3'];
 
 /** Детерминированный ГПСЧ — раскладка брусчатки не должна прыгать. */
 function rng(seed: number) {
@@ -26,70 +29,27 @@ function rng(seed: number) {
 }
 
 /**
- * Мостовые города: круглая площадь под ратушей и шесть улиц к станциям. Вся
- * брусчатка — ОДИН слой инстансов на весь город (несколько сотен плиток стоят
- * одного вызова отрисовки), поэтому детализацию можно не жалеть.
+ * Дороги города: утоптанная круглая площадь под ратушей и шесть грунтовых улиц
+ * к станциям. Каждая улица — три ленты друг на друге: широкая песчаная обочина,
+ * земля и тёмная колея посередине; концы закруглены кружками, чтобы дорога не
+ * обрывалась прямым срезом. Кромка площади намеренно неровная — по ней
+ * разбросаны кружки песка, и круг перестаёт читаться циркулем.
  */
 export const CityPavement = memo(function CityPavement() {
-  const cobbles = useMemo(() => {
-    const tiles: Placed[] = [];
+  /** Неровная кромка площади: кружки песка по её краю. */
+  const edge = useMemo(() => {
     const rand = rng(4242);
-
-    // площадь: кольца плиток вокруг центра
-    for (let ring = 1; ring <= 6; ring++) {
-      const r = (ring / 6) * (PLAZA_R - 0.12);
-      const n = Math.max(8, Math.round(r * 13));
-      for (let i = 0; i < n; i++) {
-        const a = (i / n) * Math.PI * 2 + ring * 0.2;
-        tiles.push({
-          m: chain({
-            p: [
-              TOWN_CENTER[0] + Math.cos(a) * r + (rand() - 0.5) * 0.05,
-              GRASS_Y + 0.05,
-              TOWN_CENTER[1] + Math.sin(a) * r + (rand() - 0.5) * 0.05,
-            ],
-            r: [0, -a + (rand() - 0.5) * 0.3, 0],
-            s: [0.3 + rand() * 0.08, 0.07, 0.24 + rand() * 0.07],
-          }),
-          c: COBBLE[Math.floor(rand() * COBBLE.length)],
-        });
-      }
-    }
-
-    // улицы: три ряда плиток поперёк, шагом вдоль
-    for (const st of STREETS) {
-      const dx = st.to[0] - st.from[0];
-      const dz = st.to[1] - st.from[1];
-      const len = Math.hypot(dx, dz) || 1;
-      const ux = dx / len;
-      const uz = dz / len;
-      const nx = -uz;
-      const nz = ux;
-      const steps = Math.max(4, Math.round(len / 0.3));
-      const ang = Math.atan2(ux, uz);
-      for (let i = 0; i <= steps; i++) {
-        const t = (i / steps) * len;
-        for (const j of [-1, 0, 1]) {
-          const off = j * 0.38 + (rand() - 0.5) * 0.1;
-          tiles.push({
-            m: chain({
-              p: [
-                st.from[0] + ux * t + nx * off + (rand() - 0.5) * 0.06,
-                GRASS_Y + 0.05,
-                st.from[1] + uz * t + nz * off + (rand() - 0.5) * 0.06,
-              ],
-              r: [0, ang + (rand() - 0.5) * 0.4, 0],
-              s: [0.32 + rand() * 0.09, 0.07, 0.3 + rand() * 0.08],
-            }),
-            c: COBBLE[Math.floor(rand() * COBBLE.length)],
-          });
-        }
-      }
-    }
-    return tiles;
+    return Array.from({ length: 14 }, (_, i) => {
+      const a = (i / 14) * Math.PI * 2 + rand() * 0.3;
+      const r = PLAZA_R + 0.1 + rand() * 0.35;
+      return {
+        x: TOWN_CENTER[0] + Math.cos(a) * r,
+        z: TOWN_CENTER[1] + Math.sin(a) * r,
+        s: 0.5 + rand() * 0.45,
+      };
+    });
   }, []);
 
-  // грунтовые основания под брусчаткой: обочина + тёмный шов
   const beds = useMemo(
     () =>
       STREETS.map((st) => {
@@ -97,41 +57,100 @@ export const CityPavement = memo(function CityPavement() {
         const dz = st.to[1] - st.from[1];
         return {
           position: [(st.from[0] + st.to[0]) / 2, 0, (st.from[1] + st.to[1]) / 2] as [number, number, number],
+          from: st.from,
+          to: st.to,
           angle: Math.atan2(dx, dz),
-          len: Math.hypot(dx, dz) + 0.6,
+          len: Math.hypot(dx, dz),
         };
       }),
     [],
   );
 
+  /** Камешки по обочинам — тот же приём, что на берегах реки. */
+  const pebbles = useMemo(() => {
+    const rand = rng(919);
+    const out: Placed[] = [];
+    for (const st of STREETS) {
+      const dx = st.to[0] - st.from[0];
+      const dz = st.to[1] - st.from[1];
+      const len = Math.hypot(dx, dz) || 1;
+      const ux = dx / len;
+      const uz = dz / len;
+      const steps = Math.max(3, Math.round(len / 0.55));
+      for (let i = 0; i <= steps; i++) {
+        for (const side of [1, -1]) {
+          if (rand() > 0.55) continue;
+          const t = (i / steps) * len;
+          const off = (0.6 + rand() * 0.22) * side;
+          const s = 0.06 + rand() * 0.1;
+          out.push({
+            m: chain({
+              p: [st.from[0] + ux * t - uz * off, GRASS_Y + s * 0.4, st.from[1] + uz * t + ux * off],
+              r: [rand() * 3, rand() * 3, rand() * 3],
+              s: [s * 1.4, s, s * 1.2],
+            }),
+            c: PEBBLE[Math.floor(rand() * PEBBLE.length)],
+          });
+        }
+      }
+    }
+    return out;
+  }, []);
+
   return (
     <group>
-      {/* песчаная отсыпка площади и тёмный шов под плиткой */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[TOWN_CENTER[0], GRASS_Y + 0.018, TOWN_CENTER[1]]} receiveShadow>
-        <circleGeometry args={[PLAZA_R + 0.35, 48]} />
-        <meshStandardMaterial color={PAVE_SAND} roughness={1} />
+      {/* площадь: песчаная отсыпка, утоптанная земля и её тёмная середина */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[TOWN_CENTER[0], GRASS_Y + 0.014, TOWN_CENTER[1]]} receiveShadow>
+        <circleGeometry args={[PLAZA_R + 0.42, 48]} />
+        <meshStandardMaterial color={SAND_EDGE} roughness={1} />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[TOWN_CENTER[0], GRASS_Y + 0.032, TOWN_CENTER[1]]} receiveShadow>
+      {edge.map((e, i) => (
+        <mesh key={i} rotation={[-Math.PI / 2, 0, 0]} position={[e.x, GRASS_Y + 0.016, e.z]} receiveShadow>
+          <circleGeometry args={[e.s, 18]} />
+          <meshStandardMaterial color={SAND_EDGE} roughness={1} />
+        </mesh>
+      ))}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[TOWN_CENTER[0], GRASS_Y + 0.024, TOWN_CENTER[1]]} receiveShadow>
         <circleGeometry args={[PLAZA_R, 48]} />
-        <meshStandardMaterial color={PAVE_DARK} roughness={1} />
+        <meshStandardMaterial color={DIRT} roughness={1} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[TOWN_CENTER[0], GRASS_Y + 0.03, TOWN_CENTER[1]]} receiveShadow>
+        <circleGeometry args={[PLAZA_R * 0.72, 40]} />
+        <meshStandardMaterial color={DIRT_DARK} roughness={1} />
       </mesh>
 
       {beds.map((b, i) => (
-        <group key={i} position={[b.position[0], GRASS_Y, b.position[2]]} rotation={[0, b.angle, 0]}>
-          <mesh position={[0, 0.02, 0]} receiveShadow>
-            <boxGeometry args={[1.72, 0.04, b.len]} />
-            <meshStandardMaterial color={PAVE_SAND} roughness={1} />
+        <group key={i}>
+          <group position={[b.position[0], GRASS_Y, b.position[2]]} rotation={[0, b.angle, 0]}>
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.014, 0]} receiveShadow>
+              <planeGeometry args={[1.24, b.len]} />
+              <meshStandardMaterial color={SAND_EDGE} roughness={1} />
+            </mesh>
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.024, 0]} receiveShadow>
+              <planeGeometry args={[0.94, b.len]} />
+              <meshStandardMaterial color={DIRT} roughness={1} />
+            </mesh>
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]} receiveShadow>
+              <planeGeometry args={[0.48, b.len]} />
+              <meshStandardMaterial color={DIRT_DARK} roughness={1} />
+            </mesh>
+          </group>
+          {/* закруглённый конец у станции — дорога втекает в площадку, а не
+              упирается в неё торцом */}
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[b.to[0], GRASS_Y + 0.014, b.to[1]]} receiveShadow>
+            <circleGeometry args={[0.62, 24]} />
+            <meshStandardMaterial color={SAND_EDGE} roughness={1} />
           </mesh>
-          <mesh position={[0, 0.035, 0]} receiveShadow>
-            <boxGeometry args={[1.28, 0.04, b.len]} />
-            <meshStandardMaterial color={PAVE_DARK} roughness={1} />
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[b.to[0], GRASS_Y + 0.024, b.to[1]]} receiveShadow>
+            <circleGeometry args={[0.47, 24]} />
+            <meshStandardMaterial color={DIRT} roughness={1} />
           </mesh>
         </group>
       ))}
 
-      {/* вся брусчатка города — одним слоем */}
-      <Layer items={cobbles} receiveShadow>
-        <boxGeometry args={[1, 1, 1]} />
+      {/* камешки по обочинам — одним слоем на весь город */}
+      <Layer items={pebbles} castShadow receiveShadow>
+        <icosahedronGeometry args={[1, 0]} />
         <meshStandardMaterial roughness={1} flatShading />
       </Layer>
     </group>
@@ -156,13 +175,16 @@ export const VacantLot = memo(function VacantLot() {
   return (
     <group>
       {/* размеченный участок */}
+      {/* Земля участка приглушённее дорожной: пока станций мало, пустых мест
+          на карте больше, чем занятых, и яркий песок пятью кругами перетягивал
+          на себя весь кадр. */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, GRASS_Y + 0.012, 0]} receiveShadow>
-        <circleGeometry args={[1.6, 28]} />
-        <meshStandardMaterial color="#b79f6c" roughness={1} />
+        <circleGeometry args={[1.42, 28]} />
+        <meshStandardMaterial color="#b49b6d" roughness={1} />
       </mesh>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, GRASS_Y + 0.022, 0]}>
-        <ringGeometry args={[1.18, 1.3, 32]} />
-        <meshStandardMaterial color="#e8e2c8" roughness={1} />
+        <ringGeometry args={[1.05, 1.16, 32]} />
+        <meshStandardMaterial color="#d8ceae" roughness={1} />
       </mesh>
       {/* колышки по кромке */}
       {posts.map(([x, z, a], i) => (

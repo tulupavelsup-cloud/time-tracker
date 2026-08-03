@@ -498,21 +498,32 @@ export function MapScreen({
       {/* Тёмная дымка сверху — чтобы белый текст читался поверх неба */}
       {!immersed && (
         <div
-          className="pointer-events-none fixed inset-x-0 top-0 z-10 h-44"
-          style={{ background: 'linear-gradient(to bottom, rgba(4,30,17,0.5), transparent)' }}
+          className="pointer-events-none fixed inset-x-0 top-0 z-10 h-36"
+          style={{
+            // затемнение уведено ВЛЕВО, под сводку: справа вверху висят подписи
+            // станций, и общая тёмная полоса гасила их вместе с картой
+            background:
+              'linear-gradient(155deg, rgba(4,30,17,0.55) 0%, rgba(4,30,17,0.22) 45%, rgba(4,30,17,0) 72%)',
+          }}
         />
       )}
 
       {/* Плавающая сводка сверху (стекло) */}
-      <div className={`relative z-20 px-4 pt-3 ${immersed ? 'hidden' : ''}`}>
-        <div className="flex items-end justify-between px-1">
+      {/* Сводка прижата ВЛЕВО и компактная: на телефоне плашка «Сегодня»,
+          прижатая к правому краю, вставала ровно поверх подписей станций —
+          человек не видел, что это за станция. Теперь весь блок живёт одной
+          колонкой слева и занимает не больше 70% ширины. */}
+      <div className={`relative z-20 px-4 pt-2 ${immersed ? 'hidden' : ''}`}>
+        <div className="flex items-end gap-2.5 px-1">
           <div className="min-w-0">
-            <h2 className="font-display text-xl font-medium text-white drop-shadow">{greeting()}</h2>
-            <p className="text-[11px] text-white/70">{dateText}</p>
+            <h2 className="font-display text-base font-medium leading-tight text-white drop-shadow">
+              {greeting()}
+            </h2>
+            <p className="text-[10px] text-white/70">{dateText}</p>
           </div>
-          <div className="glass-dark shrink-0 px-3 py-1.5 text-right">
-            <p className="text-[10px] uppercase tracking-wide text-white/55">Сегодня</p>
-            <p className="whitespace-nowrap font-display text-base tabular-nums text-lime-300">
+          <div className="glass-dark shrink-0 px-2.5 py-1">
+            <p className="text-[9px] uppercase leading-tight tracking-wide text-white/55">Сегодня</p>
+            <p className="whitespace-nowrap font-display text-sm tabular-nums leading-tight text-lime-300">
               {formatDuration(todayTotal)}
             </p>
           </div>
@@ -523,7 +534,7 @@ export function MapScreen({
             type="button"
             whileTap={{ scale: 0.98 }}
             onClick={() => handleStation(activeCat.id)}
-            className="glass-dark mt-3 flex w-full items-center gap-3 px-4 py-3 text-left"
+            className="glass-dark mt-2 flex w-[80%] items-center gap-2.5 px-3 py-2 text-left"
           >
             <motion.span
               className="h-2.5 w-2.5 shrink-0 rounded-full"
@@ -544,12 +555,14 @@ export function MapScreen({
             whileTap={{ scale: 0.98 }}
             disabled={busy}
             onClick={() => void handleContinue()}
-            className="mt-3 flex w-full items-center gap-3 rounded-3xl bg-lime-300 px-4 py-3 text-left text-emerald-950 shadow-lg disabled:opacity-60"
+            className="mt-2 flex w-[80%] items-center gap-2.5 rounded-3xl bg-lime-300 px-3 py-2 text-left text-emerald-950 shadow-lg disabled:opacity-60"
           >
-            <PlayIcon className="h-5 w-5 shrink-0" />
+            <PlayIcon className="h-4 w-4 shrink-0" />
             <span className="min-w-0">
-              <span className="block text-[10px] font-semibold uppercase tracking-wide opacity-60">Продолжить</span>
-              <span className="block truncate font-display text-sm font-medium">
+              <span className="block text-[9px] font-semibold uppercase leading-tight tracking-wide opacity-60">
+                Продолжить
+              </span>
+              <span className="block truncate font-display text-[13px] font-medium leading-tight">
                 {lastCat.name}
                 {last.task_id ? ` · ${tasks.find((t) => t.id === last.task_id)?.name ?? ''}` : ''}
               </span>

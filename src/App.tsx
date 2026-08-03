@@ -66,27 +66,47 @@ function Shell({ user }: { user: User }) {
         transition={{ duration: 0.28 }}
         style={{ pointerEvents: immersed ? 'none' : 'auto' }}
       >
-        <div className="min-w-0 flex-1">
+        {/* Шапка прижата ВЛЕВО и ничего не держит справа: правый верхний угол
+            отдан карте — там висят подписи станций, и любая плашка над ними
+            закрывала как раз то, по чему станцию и выбирают. */}
+        <div className="min-w-0 max-w-[70%]">
           <div className="flex items-center gap-2">
-            <h1 className="font-display text-base font-semibold text-white">Тайм-трекер</h1>
+            <h1 className="font-display text-sm font-semibold text-white">Тайм-трекер</h1>
             {IS_DEMO && (
-              <span className="rounded-full bg-lime-300 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-950">
+              <span className="rounded-full bg-lime-300 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-emerald-950">
                 Демо
               </span>
             )}
           </div>
-          <p className="truncate text-[11px] text-white/50">{user.email}</p>
+          <p className="truncate text-[10px] text-white/50">{user.email}</p>
         </div>
-        <motion.button
-          type="button"
-          whileTap={{ scale: 0.88 }}
-          onClick={() => void handleSignOut()}
-          aria-label="Выйти из аккаунта"
-          className="glass-dark flex h-10 w-10 items-center justify-center !rounded-2xl text-white/70"
-        >
-          <LogoutIcon />
-        </motion.button>
       </motion.header>
+
+      {/* Выход — в правом нижнем углу карты, над таб-баром: наверху он
+          загораживал подписи станций, а внизу справа свободно. Только на карте:
+          на «Статистике» и «Категориях» плавающая кнопка легла бы поверх строк
+          списка и перехватывала бы тапы по их иконкам. */}
+      {tab === 'home' && (
+        <motion.div
+          className="pointer-events-none fixed inset-x-0 z-30 mx-auto w-full max-w-[430px] px-4"
+          animate={{ opacity: immersed ? 0 : 1, y: immersed ? 90 : 0 }}
+          transition={{ duration: 0.28 }}
+          style={{ bottom: 'calc(84px + env(safe-area-inset-bottom))' }}
+        >
+          <div className="flex justify-end">
+            <motion.button
+              type="button"
+              whileTap={{ scale: 0.88 }}
+              onClick={() => void handleSignOut()}
+              aria-label="Выйти из аккаунта"
+              className="glass-dark pointer-events-auto flex h-10 w-10 items-center justify-center !rounded-2xl text-white/70"
+              style={{ pointerEvents: immersed ? 'none' : 'auto' }}
+            >
+              <LogoutIcon />
+            </motion.button>
+          </div>
+        </motion.div>
+      )}
 
       <main className="flex flex-1 flex-col pb-[calc(96px+env(safe-area-inset-bottom))]">
         <AnimatePresence mode="wait">

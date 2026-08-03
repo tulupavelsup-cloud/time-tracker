@@ -1,20 +1,20 @@
 /**
- * Земля под городом (3D) — широкая долина, уходящая за края экрана. Мягкий
- * «игрушечный» 3D по референсам: матовая трава, объёмные кроны, кусты, камни,
- * пруды, холмы по горизонту.
+ * Земля под городом (3D) — лесная долина по референсу: город стоит на поляне,
+ * со всех сторон обступает густой хвойный лес, справа течёт река с песчаными
+ * берегами, по лугу пасутся овцы.
  *
- * Созвон №6: карта стала статичной, перетаскивание и зум убраны — освободившийся
- * запас производительности ушёл сюда. Декора стало заметно больше (кварталы
- * домиков между улицами, парк с фонтаном, живые изгороди, клумбы, гуляющие
- * горожане), но платим за это по-прежнему копейки: всё повторяющееся рисуется
- * ПОЛЯМИ ИНСТАНСОВ (см. Instanced.tsx) — один вызов отрисовки на слой, а не на
- * каждый цветок. Кадр теперь неподвижен, поэтому теневая карта пересчитывается
- * редко (см. ShadowPacer в HomeScene) — это и есть главный источник экономии.
+ * Рисовка целиком лоу-поли: гранёные кроны и бугры, матовая трава, тёплый песок,
+ * бирюзовая вода. Плотность леса — то, что и отличает картинку референса от
+ * «станций на зелёной заливке», поэтому деревьев здесь СОТНИ. Платим за это
+ * копейки: всё повторяющееся рисуется ПОЛЯМИ ИНСТАНСОВ (см. Instanced.tsx) —
+ * один вызов отрисовки на слой, а не на каждое дерево. Кадр неподвижен, поэтому
+ * теневая карта пересчитывается редко (см. ShadowPacer в HomeScene).
  *
  * Верх земли = GRASS_Y (0).
  */
 
 import { memo, useMemo } from 'react';
+import * as THREE from 'three';
 import {
   Bench,
   BushField,
@@ -23,113 +23,177 @@ import {
   FlowerField,
   GrassField,
   LampPost,
-  LilyPad,
   Motes,
+  MoundField,
   MushroomField,
+  rng,
   scatterBed,
   scatterPebbles,
+  SheepField,
   StoneField,
   TreeField,
   type FlowerSpec,
   type StoneSpec,
+  type TreeSpec,
   type TuftSpec,
 } from './Decor';
-import { besideStreet, CITY_SLOTS, citySamples, distanceToCity, PLAZA_R, TOWN_CENTER } from './cityLayout';
+import {
+  besideStreet,
+  CITY_SLOTS,
+  citySamples,
+  distanceToCity,
+  PLAZA_R,
+  spot,
+  TOWN_CENTER,
+} from './cityLayout';
 import { chain, Layer, type Placed } from './Instanced';
+import { GRASS, SAND, WATER, WATER_SHALLOW } from './worldPalette';
 
 export const GRASS_Y = 0;
 
-/** Пологий холм-дюна на фоне (лоу-поли, уходит за край мира). */
-function Hill({
-  position,
-  scale = [6, 3, 6],
-  color = '#5c9e34',
-}: {
-  position: [number, number, number];
-  scale?: [number, number, number];
-  color?: string;
-}) {
-  return (
-    <mesh castShadow receiveShadow position={position} scale={scale}>
-      <icosahedronGeometry args={[1, 1]} />
-      <meshStandardMaterial color={color} roughness={1} flatShading />
-    </mesh>
-  );
+/** Докуда тянется земля и лес (мир заведомо шире любого кадра). */
+const WORLD_HALF = 52;
+/** Радиус поляны: внутри него леса нет — там живёт город. */
+const CLEARING_R = 7.4;
+/** Докуда сажаем лес. */
+const FOREST_R = 34;
+
+/* ───────────────────────── река ───────────────────────── */
+
+/**
+ * Русло реки в осях экрана (см. spot в cityLayout): течёт справа от города,
+ * из глубины кадра к зрителю, как на референсе.
+ */
+const RIVER_PATH: [number, number][] = [
+  spot(11, -22),
+  spot(8.4, -13),
+  spot(7.1, -5),
+  spot(6.6, 2),
+  spot(6.2, 9),
+  spot(6.0, 16),
+  spot(7.5, 24),
+];
+
+/** Кривая русла — одна на весь модуль: по ней строятся и лента воды, и берега. */
+const RIVER_CURVE = new THREE.CatmullRomCurve3(
+  RIVER_PATH.map(([x, z]) => new THREE.Vector3(x, 0, z)),
+);
+
+/** Полуширина воды в доле t вдоль русла (к зрителю река шире). */
+function riverHalfWidth(t: number) {
+  return 1.15 + t * 1.15 + Math.sin(t * 9) * 0.16;
 }
 
-/** Пруд: песчаный берег, вода с бликом, каменный ободок, кувшинки и камыш. */
-export function Pond({ position, r = 1.6 }: { position: [number, number, number]; r?: number }) {
-  const rim = useMemo<StoneSpec[]>(() => {
-    const n = Math.round(r * 10);
-    return Array.from({ length: n }, (_, i) => {
-      const a = (i / n) * Math.PI * 2;
-      const rr = r * (1.02 + (i % 3) * 0.03);
-      return {
-        p: [Math.cos(a) * rr, 0.05, Math.sin(a) * rr] as [number, number, number],
-        s: 0.08 + ((i * 7) % 5) * 0.02,
-        c: i % 2 ? '#b8b0a0' : '#a29884',
-      };
-    });
-  }, [r]);
-  const reeds = useMemo(() => {
-    return [0.4, 1.6, 3.0, 4.5].map((a) => ({ x: Math.cos(a) * r * 0.92, z: Math.sin(a) * r * 0.92, h: 0.5 + (a % 1) * 0.4 }));
-  }, [r]);
-  return (
-    <group position={position}>
-      {/* песчаный берег */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, 0]} receiveShadow>
-        <circleGeometry args={[r * 1.18, 44]} />
-        <meshStandardMaterial color="#d8c58f" roughness={1} />
-      </mesh>
-      {/* вода */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]} receiveShadow>
-        <circleGeometry args={[r, 44]} />
-        <meshStandardMaterial color="#3f9ec6" roughness={0.12} metalness={0.2} />
-      </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-r * 0.18, 0.03, -r * 0.1]}>
-        <circleGeometry args={[r * 0.55, 36]} />
-        <meshStandardMaterial color="#6fc6e2" roughness={0.06} metalness={0.25} transparent opacity={0.65} />
-      </mesh>
-      {/* каменный ободок */}
-      <StoneField items={rim} />
-      {/* камыш */}
-      {reeds.map((rd, i) => (
-        <group key={i} position={[rd.x, 0, rd.z]}>
-          <mesh position={[0, rd.h / 2, 0]}>
-            <cylinderGeometry args={[0.015, 0.02, rd.h, 6]} />
-            <meshStandardMaterial color="#4f8f35" roughness={1} />
-          </mesh>
-          <mesh position={[0, rd.h + 0.04, 0]}>
-            <capsuleGeometry args={[0.03, 0.08, 4, 8]} />
-            <meshStandardMaterial color="#8a5a33" roughness={0.9} />
-          </mesh>
-        </group>
-      ))}
-      <LilyPad position={[r * 0.35, 0.03, r * 0.2]} />
-      <LilyPad position={[-r * 0.4, 0.03, r * 0.35]} />
-      <LilyPad position={[r * 0.1, 0.03, -r * 0.45]} />
-    </group>
-  );
+/**
+ * Плоская лента вдоль кривой: по ней рисуются и вода, и песчаные берега, и
+ * отмель. Нормали ставим вверх вручную — лента строго горизонтальная, и так
+ * свет ложится на неё одинаково независимо от направления обхода.
+ */
+function ribbonGeometry(
+  curve: THREE.CatmullRomCurve3,
+  halfWidth: (t: number) => number,
+  segments = 96,
+) {
+  const position: number[] = [];
+  const normal: number[] = [];
+  const index: number[] = [];
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const p = curve.getPoint(t);
+    const tg = curve.getTangent(t);
+    const nx = -tg.z;
+    const nz = tg.x;
+    const l = Math.hypot(nx, nz) || 1;
+    const w = halfWidth(t);
+    position.push(p.x + (nx / l) * w, 0, p.z + (nz / l) * w);
+    position.push(p.x - (nx / l) * w, 0, p.z - (nz / l) * w);
+    normal.push(0, 1, 0, 0, 1, 0);
+  }
+  for (let i = 0; i < segments; i++) {
+    const a = i * 2;
+    index.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(normal, 3));
+  g.setIndex(index);
+  g.computeBoundingSphere();
+  return g;
 }
 
-/** Прямая грунтовая дорога между двумя точками (плоская лента). */
-export function Road({ from, to, width = 1.0 }: { from: [number, number]; to: [number, number]; width?: number }) {
-  const dx = to[0] - from[0];
-  const dz = to[1] - from[1];
-  const len = Math.hypot(dx, dz);
-  const angle = Math.atan2(dx, dz);
+/**
+ * Река: песчаный берег, вода, светлая отмель у кромки и валуны по берегам.
+ * Ленты кладутся друг на друга с крошечным шагом по высоте — так на плоской
+ * земле не рябит z-fighting.
+ */
+const River = memo(function River() {
+  const geo = useMemo(
+    () => ({
+      bank: ribbonGeometry(RIVER_CURVE, (t) => riverHalfWidth(t) + 0.42),
+      water: ribbonGeometry(RIVER_CURVE, riverHalfWidth),
+      shallow: ribbonGeometry(RIVER_CURVE, (t) => riverHalfWidth(t) * 0.55),
+    }),
+    [],
+  );
+
+  // валуны и галька по обоим берегам — река не должна упираться в траву стыком
+  const stones = useMemo<StoneSpec[]>(() => {
+    const r = rng(515);
+    const out: StoneSpec[] = [];
+    for (let i = 0; i <= 26; i++) {
+      const t = i / 26;
+      const p = RIVER_CURVE.getPoint(t);
+      const tg = RIVER_CURVE.getTangent(t);
+      const nx = -tg.z;
+      const nz = tg.x;
+      const l = Math.hypot(nx, nz) || 1;
+      for (const side of [1, -1]) {
+        if (r() > 0.72) continue;
+        const off = (riverHalfWidth(t) + 0.35 + r() * 0.55) * side;
+        const s = 0.12 + r() * 0.22;
+        out.push({
+          p: [p.x + (nx / l) * off, GRASS_Y + s * 0.35, p.z + (nz / l) * off],
+          s: [s * 1.3, s, s * 1.1],
+          r: [r() * 3, r() * 3, r() * 3],
+          c: r() > 0.5 ? '#b9b1a0' : '#a49a88',
+        });
+      }
+    }
+    return out;
+  }, []);
+
   return (
-    <group position={[(from[0] + to[0]) / 2, GRASS_Y + 0.02, (from[1] + to[1]) / 2]} rotation={[0, angle, 0]}>
-      <mesh receiveShadow>
-        <boxGeometry args={[width, 0.06, len]} />
-        <meshStandardMaterial color="#c2a066" roughness={1} />
+    <group>
+      <mesh geometry={geo.bank} position={[0, GRASS_Y + 0.012, 0]} receiveShadow>
+        <meshStandardMaterial color={SAND} roughness={1} />
       </mesh>
-      <mesh position={[0, 0.035, 0]}>
-        <boxGeometry args={[width * 0.7, 0.04, len]} />
-        <meshStandardMaterial color="#cdae74" roughness={1} />
+      <mesh geometry={geo.water} position={[0, GRASS_Y + 0.026, 0]} receiveShadow>
+        <meshStandardMaterial color={WATER} roughness={0.14} metalness={0.25} />
       </mesh>
+      <mesh geometry={geo.shallow} position={[0, GRASS_Y + 0.034, 0]}>
+        <meshStandardMaterial
+          color={WATER_SHALLOW}
+          roughness={0.06}
+          metalness={0.3}
+          transparent
+          opacity={0.6}
+        />
+      </mesh>
+      <StoneField items={stones} />
     </group>
   );
+});
+
+/** Расстояние от точки до русла (по выборке вдоль кривой). */
+function distanceToRiver(x: number, z: number) {
+  let best = Infinity;
+  for (let i = 0; i <= 48; i++) {
+    const t = i / 48;
+    const p = RIVER_CURVE.getPoint(t);
+    const d = Math.hypot(p.x - x, p.z - z) - riverHalfWidth(t);
+    if (d < best) best = d;
+  }
+  return best;
 }
 
 /* ───────────────────────── городская застройка ───────────────────────── */
@@ -149,8 +213,13 @@ interface HouseSpec {
 
 /**
  * Кварталы домиков между улицами — то, что и делает карту городом, а не
- * поляной со станциями. Все домики одного типа рисуются полями инстансов:
- * стены, крыши, трубы и окна — по слою на каждое.
+ * поляной со станциями. Домик собран по референсу: каменный цоколь, светлые
+ * оштукатуренные стены, ТЁМНАЯ крыша с широким свесом и тёплые светящиеся окна.
+ * Свес и тёплый свет в окнах — та самая «уютность», за счёт которой на
+ * референсе даже проходной домик выглядит обжитым.
+ *
+ * Все домики одного типа рисуются полями инстансов: стены, крыши, свесы, трубы
+ * и окна — по слою на каждое.
  */
 function HouseBlocks({ items }: { items: HouseSpec[] }) {
   const parts = useMemo(() => {
@@ -160,38 +229,52 @@ function HouseBlocks({ items }: { items: HouseSpec[] }) {
     const eaves: Placed[] = [];
     const chimneys: Placed[] = [];
     const windows: Placed[] = [];
+    const beams: Placed[] = [];
     for (const h of items) {
       const root = { p: [h.x, GRASS_Y, h.z] as [number, number, number], r: [0, h.rot, 0] as [number, number, number] };
-      bases.push({ m: chain(root, { p: [0, 0.05, 0], s: [h.w + 0.14, 0.1, h.d + 0.14] }), c: '#c3b9a1' });
-      walls.push({ m: chain(root, { p: [0, h.h / 2 + 0.08, 0], s: [h.w, h.h, h.d] }), c: h.wall });
-      // крыша — коробка, повёрнутая на 45°: получается двускатная призма
-      const rh = Math.min(h.w, h.d) * 0.52;
+      bases.push({ m: chain(root, { p: [0, 0.07, 0], s: [h.w + 0.2, 0.14, h.d + 0.2] }), c: '#a89c86' });
+      walls.push({ m: chain(root, { p: [0, h.h / 2 + 0.12, 0], s: [h.w, h.h, h.d] }), c: h.wall });
+      // крыша — коробка, повёрнутая на 45°: получается двускатная призма.
+      // Свес широкий (×1.32 от габарита дома) — тень под ним и делает картинку
+      // «мягкой игрушкой», а не набором кубиков.
+      const rh = Math.min(h.w, h.d) * 0.62;
       roofs.push({
-        m: chain(root, { p: [0, h.h + 0.08 + rh * 0.62, 0], r: [0, 0, Math.PI / 4], s: [rh * 1.42, rh * 1.42, h.d + 0.16] }),
+        m: chain(root, { p: [0, h.h + 0.12 + rh * 0.6, 0], r: [0, 0, Math.PI / 4], s: [rh * 1.42, rh * 1.42, h.d * 1.32] }),
         c: h.roof,
       });
-      eaves.push({ m: chain(root, { p: [0, h.h + 0.1, 0], s: [h.w + 0.22, 0.07, h.d + 0.24] }), c: '#8e6a52' });
-      chimneys.push({ m: chain(root, { p: [h.w * 0.28, h.h + rh * 0.9, h.d * 0.16], s: [0.14, 0.42, 0.14] }), c: '#b4a58f' });
+      eaves.push({ m: chain(root, { p: [0, h.h + 0.14, 0], s: [h.w + 0.3, 0.08, h.d + 0.34] }), c: '#7a5a44' });
+      // угловые стойки фахверка — вертикальный ритм на фасаде
+      for (const sx of [-1, 1]) {
+        beams.push({
+          m: chain(root, { p: [(sx * h.w) / 2, h.h / 2 + 0.12, h.d / 2], s: [0.09, h.h, 0.09] }),
+          c: '#8b6a4e',
+        });
+      }
+      chimneys.push({ m: chain(root, { p: [h.w * 0.3, h.h + rh * 0.95, h.d * 0.14], s: [0.15, 0.5, 0.15] }), c: '#9d9080' });
       // окна на фасаде (локальный +z)
-      for (const dx of [-h.w * 0.26, h.w * 0.26]) {
+      for (const dx of [-h.w * 0.27, h.w * 0.27]) {
         windows.push({
-          m: chain(root, { p: [dx, h.h * 0.55, h.d / 2 + 0.01], s: [h.w * 0.24, h.h * 0.34, 0.03] }),
-          c: '#8fc4dd',
+          m: chain(root, { p: [dx, h.h * 0.55, h.d / 2 + 0.02], s: [h.w * 0.23, h.h * 0.32, 0.04] }),
+          c: '#ffd08a',
         });
       }
     }
-    return { walls, bases, roofs, eaves, chimneys, windows };
+    return { walls, bases, roofs, eaves, chimneys, windows, beams };
   }, [items]);
 
   return (
     <group>
-      <Layer items={parts.bases} receiveShadow>
+      <Layer items={parts.bases} castShadow receiveShadow>
         <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial roughness={1} />
+        <meshStandardMaterial roughness={1} flatShading />
       </Layer>
       <Layer items={parts.walls} castShadow receiveShadow>
         <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial roughness={0.92} />
+        <meshStandardMaterial roughness={0.94} />
+      </Layer>
+      <Layer items={parts.beams} castShadow>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshStandardMaterial roughness={0.9} />
       </Layer>
       <Layer items={parts.eaves} castShadow>
         <boxGeometry args={[1, 1, 1]} />
@@ -199,15 +282,16 @@ function HouseBlocks({ items }: { items: HouseSpec[] }) {
       </Layer>
       <Layer items={parts.roofs} castShadow receiveShadow>
         <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial roughness={0.85} flatShading />
+        <meshStandardMaterial roughness={0.86} flatShading />
       </Layer>
       <Layer items={parts.chimneys} castShadow>
         <boxGeometry args={[1, 1, 1]} />
         <meshStandardMaterial roughness={0.95} />
       </Layer>
+      {/* окна светятся тёплым — как в домиках референса */}
       <Layer items={parts.windows}>
         <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial roughness={0.3} metalness={0.1} emissive="#20384a" emissiveIntensity={0.2} />
+        <meshStandardMaterial roughness={0.35} emissive="#ffae42" emissiveIntensity={0.85} />
       </Layer>
     </group>
   );
@@ -223,7 +307,7 @@ function Fountain({ position }: { position: [number, number, number] }) {
       </mesh>
       <mesh position={[0, 0.21, 0]}>
         <cylinderGeometry args={[0.44, 0.44, 0.04, 20]} />
-        <meshStandardMaterial color="#4f9ec4" roughness={0.12} metalness={0.2} />
+        <meshStandardMaterial color={WATER} roughness={0.12} metalness={0.2} />
       </mesh>
       <mesh castShadow position={[0, 0.36, 0]}>
         <cylinderGeometry args={[0.08, 0.12, 0.34, 10]} />
@@ -247,7 +331,7 @@ function HedgeRow({ items }: { items: { x: number; z: number; rot: number; len: 
     () =>
       items.map((h) => ({
         m: chain({ p: [h.x, GRASS_Y + 0.19, h.z], r: [0, h.rot, 0], s: [h.len, 0.38, 0.34] }),
-        c: '#4c9a34',
+        c: '#3f8f2d',
       })),
     [items],
   );
@@ -257,6 +341,57 @@ function HedgeRow({ items }: { items: { x: number; z: number; rot: number; len: 
       <meshStandardMaterial roughness={1} flatShading />
     </Layer>
   );
+}
+
+/* ───────────────────────── лес ───────────────────────── */
+
+/**
+ * Лес вокруг поляны. Сажается кольцами от кромки поляны к горизонту: чем
+ * дальше от города, тем плотнее и крупнее деревья — у самой поляны редкие
+ * одиночки, дальше сплошная стена, как на референсе. Хвои примерно вчетверо
+ * больше, чем лиственных.
+ *
+ * Раскладка детерминированная (сид) — лес не должен пересаживаться при каждой
+ * перерисовке.
+ */
+function plantForest(blocked: (x: number, z: number, r: number) => boolean) {
+  const r = rng(70707);
+  const conifers: TreeSpec[] = [];
+  const trees: TreeSpec[] = [];
+  const bushes: TreeSpec[] = [];
+  for (let ring = 0; ring < 20; ring++) {
+    const rad = CLEARING_R + ring * 1.32 + r() * 0.7;
+    if (rad > FOREST_R) break;
+    // плотность растёт от кромки поляны к горизонту
+    const fill = Math.min(1, 0.34 + ring * 0.075);
+    const n = Math.round(rad * 1.35 * fill) + 3;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + r() * (Math.PI / n) * 1.8 + ring * 0.41;
+      const rr = rad + (r() - 0.5) * 1.7;
+      const x = Math.cos(a) * rr;
+      const z = Math.sin(a) * rr;
+      if (blocked(x, z, 1.5)) continue;
+      const spec: TreeSpec = {
+        x,
+        z,
+        scale: 0.85 + r() * 0.75 + ring * 0.02,
+        rot: r() * Math.PI * 2,
+        tone: Math.floor(r() * 4),
+      };
+      if (r() > 0.78) trees.push({ ...spec, scale: spec.scale * 0.92 });
+      else conifers.push(spec);
+      // подлесок в глубине леса
+      if (r() > 0.72) {
+        bushes.push({
+          x: x + (r() - 0.5) * 2.2,
+          z: z + (r() - 0.5) * 2.2,
+          scale: 0.8 + r() * 0.7,
+          rot: r() * Math.PI * 2,
+        });
+      }
+    }
+  }
+  return { conifers, trees, bushes };
 }
 
 /**
@@ -281,19 +416,66 @@ export const Terrain = memo(function Terrain() {
     };
   }, []);
 
-  // Разбросанный декор — стабильные позиции (без random в рантайме)
+  /**
+   * Занято ли место: мостовая, площадка станции или река. По этой проверке
+   * отсеивается и лес, и мелкий декор — иначе ёлка вырастает посреди улицы, а
+   * цветок торчит сквозь воду.
+   */
+  const blocked = useMemo(() => {
+    return (x: number, z: number, r: number) => {
+      if (distanceToCity(city.samples, x, z) <= r) return true;
+      if (distanceToRiver(x, z) <= r * 0.8 + 0.5) return true;
+      // 1.55 — радиус вытоптанной земли под станцией (см. Station в HomeScene)
+      for (const [sx, sz] of CITY_SLOTS) {
+        if ((sx - x) ** 2 + (sz - z) ** 2 <= (r + 1.55) ** 2) return true;
+      }
+      return false;
+    };
+  }, [city.samples]);
+
+  /** Лес — главный герой картинки. Сажается один раз. */
+  const forest = useMemo(() => plantForest(blocked), [blocked]);
+
+  /**
+   * Кулисы переднего плана — деревья у самой нижней кромки кадра, как на
+   * референсе: они закрывают нижние углы и дают глубину.
+   *
+   * Ставятся в осях экрана по РЕАЛЬНЫМ границам кадра: телефонный кадр сильно
+   * сужается к зрителю — нижняя кромка проходит по f ≈ 9.5, и уже при |u| ≈ 4
+   * дерево наполовину за краем экрана. Ровно так и надо: обрезанный краем ствол
+   * на референсе и держит угол.
+   */
+  const foreground = useMemo<TreeSpec[]>(() => {
+    const r = rng(4);
+    return ([
+      [-3.35, 9.6], [-3.9, 8.5], [-4.0, 6.6],
+      [3.45, 9.6], [4.0, 8.5], [4.1, 6.6],
+    ] as [number, number][]).map(([u, f], i) => {
+      const [x, z] = spot(u, f);
+      return { x, z, scale: 1.25 + (i % 3) * 0.25 + r() * 0.3, rot: r() * 6.28, tone: Math.floor(r() * 4) };
+    });
+  }, []);
+
+  /**
+   * Деревья внутри самой поляны — в промежутках между станциями и по бокам
+   * кадра. На референсе лес не обрывается по кромке деревни, а заходит в неё:
+   * без этих деревьев город выглядит вырезанным из леса циркулем.
+   */
+  const inTown = useMemo<TreeSpec[]>(() => {
+    const r = rng(61);
+    return ([
+      [-5.0, -2.8], [5.1, -1.6], [-5.4, 2.4], [5.5, 3.0],
+      [-5.2, -6.5], [5.3, -6.0], [0.2, -8.8], [-1.9, -9.4], [2.4, -9.0],
+    ] as [number, number][])
+      .map(([u, f]) => {
+        const [x, z] = spot(u, f);
+        return { x, z, scale: 1.0 + r() * 0.45, rot: r() * 6.28, tone: Math.floor(r() * 4) };
+      })
+      .filter((t) => !blocked(t.x, t.z, 1.4));
+  }, [blocked]);
+
+  // Разбросанный по поляне декор — стабильные позиции (без random в рантайме)
   const decor = useMemo(() => {
-    const trees: [number, number, number][] = [
-      [-10, -8, 1.2], [10, -9, 1.0], [-12, 4, 1.3], [12, 6, 1.1], [-8, 10, 1.0],
-      [9, 11, 1.2], [-14, -2, 0.9], [3, -12, 1.1], [-4, 13, 1.0], [-9, 2, 0.85],
-      [7, -12, 1.0], [-6, -13, 1.15], [13, -2, 0.95], [-13, 9, 1.05], [5, 13, 0.9],
-      [-16, -6, 1.1], [15, 9, 1.0],
-    ];
-    const conifers: [number, number, number][] = [
-      [14, -3, 1.2], [-15, 9, 1.3], [15, 1, 1.1], [-2, -14, 1.1], [9, -1, 1.0],
-      [-13, -8, 1.25], [13, 11, 1.15], [-16, 2, 1.2], [5, 14, 1.0],
-      [-11, 13, 1.1], [11, -13, 1.15], [17, 4, 1.05], [-18, -1, 1.2],
-    ];
     const bushes: [number, number, number][] = [
       [-6.5, -2, 1], [7, 3, 1.1], [-3, 8, 0.9], [4, -7, 1], [-8, -6, 0.8],
       [11, -5, 0.9], [-11, 1, 1], [2, 12, 0.9], [8, 8, 1.1],
@@ -329,10 +511,7 @@ export const Terrain = memo(function Terrain() {
       { p: [TOWN_CENTER[0] + 2.8, GRASS_Y, TOWN_CENTER[1] + 1.1], r: 0.9, n: 12, seed: 77 },
     ];
 
-    // раскладываем всё, что рисуется полями инстансов
-    const treeItems = trees.map(([x, z, scale]) => ({ x, z, scale }));
-    const coniferItems = conifers.map(([x, z, scale]) => ({ x, z, scale }));
-    const bushItems = bushes.map(([x, z, scale]) => ({ x, z, scale }));
+    const bushItems: TreeSpec[] = bushes.map(([x, z, scale], i) => ({ x, z, scale, rot: i * 0.7 }));
     const mushroomItems = mushrooms.map(([x, z, scale]) => ({ x, z, scale }));
 
     // камни: валуны + кучки гальки (икосаэдр у Rock был радиусом 0.5 — отсюда s/2)
@@ -357,30 +536,124 @@ export const Terrain = memo(function Terrain() {
     }
 
     /**
-     * Убираем всё, что попало на мостовую или на место станции: травинки и
-     * цветы иначе торчат сквозь брусчатку, дерево встаёт посреди улицы, а куст
-     * пробивает площадку зоны. Радиус — по размеру самого декора плюс запас.
+     * Луг между станциями. Голая зелёная заливка в самом центре кадра — то,
+     * из-за чего карта и выглядела пустой рядом с референсом, поэтому
+     * промежутки засеиваются травой, цветами, кустиками и камешками.
      */
-    const far = (x: number, z: number, r: number) => {
-      if (distanceToCity(city.samples, x, z) <= r) return false;
-      for (const [sx, sz] of CITY_SLOTS) {
-        if ((sx - x) ** 2 + (sz - z) ** 2 <= (r + 1.5) ** 2) return false;
+    const rand = rng(1201);
+    for (let i = 0; i < 150; i++) {
+      const a = rand() * Math.PI * 2;
+      const rad = 3 + Math.sqrt(rand()) * (CLEARING_R - 1.4);
+      const x = Math.cos(a) * rad;
+      const z = Math.sin(a) * rad;
+      const roll = rand();
+      if (roll < 0.56) tuftItems.push({ x, z, scale: 0.8 + rand() * 0.7, seedX: x, seedZ: z });
+      else if (roll < 0.76) {
+        flowerItems.push({
+          x,
+          z,
+          color: ['#f6d24b', '#e86ca8', '#ef6b6b', '#ffffff', '#9d7bea'][Math.floor(rand() * 5)],
+          scale: 0.9 + rand() * 0.6,
+          rot: rand() * 6.28,
+        });
+      } else if (roll < 0.9) {
+        bushItems.push({ x, z, scale: 0.55 + rand() * 0.4, rot: rand() * 6.28 });
+      } else {
+        const s = 0.07 + rand() * 0.13;
+        stoneItems.push({
+          p: [x, GRASS_Y + s * 0.4, z],
+          s: [s * 1.4, s, s * 1.2],
+          r: [rand() * 3, rand() * 3, rand() * 3],
+          c: rand() > 0.5 ? '#b3ab95' : '#a49a88',
+        });
       }
-      return true;
-    };
+    }
+
+    /**
+     * Ближний луг — полоса между нижними станциями и кромкой кадра. Радиусом
+     * от центра города её не накрыть (она уже за поляной), а пустой она хуже
+     * всего: это самый крупный план, там каждая травинка видна.
+     */
+    for (let i = 0; i < 90; i++) {
+      const [x, z] = spot((rand() - 0.5) * 7.4, 6 + rand() * 4.2);
+      const roll = rand();
+      if (roll < 0.44) tuftItems.push({ x, z, scale: 0.9 + rand() * 0.8, seedX: x, seedZ: z });
+      else if (roll < 0.62) {
+        flowerItems.push({
+          x,
+          z,
+          color: ['#f6d24b', '#e86ca8', '#ef6b6b', '#ffffff', '#9d7bea'][Math.floor(rand() * 5)],
+          scale: 1 + rand() * 0.7,
+          rot: rand() * 6.28,
+        });
+      } else if (roll < 0.85) {
+        bushItems.push({ x, z, scale: 0.7 + rand() * 0.7, rot: rand() * 6.28 });
+      } else {
+        const s = 0.1 + rand() * 0.18;
+        stoneItems.push({
+          p: [x, GRASS_Y + s * 0.4, z],
+          s: [s * 1.4, s, s * 1.2],
+          r: [rand() * 3, rand() * 3, rand() * 3],
+          c: rand() > 0.5 ? '#b3ab95' : '#a49a88',
+        });
+      }
+    }
+
+    // Отступы небольшие: мелочь должна подходить к самой кромке дороги и
+    // площадки станции, иначе вокруг каждой зоны появляется пустое кольцо.
     const clear = <T extends { x: number; z: number }>(items: T[], r: number) =>
-      items.filter((it) => far(it.x, it.z, r));
+      items.filter((it) => !blocked(it.x, it.z, r));
 
     return {
-      treeItems: clear(treeItems, 2.0),
-      coniferItems: clear(coniferItems, 2.0),
-      bushItems: clear(bushItems, 1.5),
-      mushroomItems: clear(mushroomItems, 1.1),
-      stoneItems: stoneItems.filter((s) => far(s.p[0], s.p[2], 1.1)),
-      flowerItems: clear(flowerItems, 1.05),
-      tuftItems: clear(tuftItems, 1.05),
+      bushItems: clear(bushItems, 0.9),
+      mushroomItems: clear(mushroomItems, 0.8),
+      stoneItems: stoneItems.filter((s) => !blocked(s.p[0], s.p[2], 0.7)),
+      flowerItems: clear(flowerItems, 0.7),
+      tuftItems: clear(tuftItems, 0.7),
     };
-  }, [city.samples]);
+  }, [blocked]);
+
+  /**
+   * Пологие бугры травы по всему миру — рельеф вместо идеальной плоскости.
+   * В городе их нет: там земля ровная под мостовыми и площадками станций.
+   */
+  const mounds = useMemo(() => {
+    const r = rng(3311);
+    const tone = [GRASS.light, GRASS.dark, GRASS.base, GRASS.moss];
+    const out: { x: number; z: number; rx: number; ry: number; rot: number; c: string }[] = [];
+    for (let i = 0; i < 90; i++) {
+      const a = r() * Math.PI * 2;
+      const rad = 5 + Math.sqrt(r()) * 30;
+      const x = Math.cos(a) * rad;
+      const z = Math.sin(a) * rad;
+      if (blocked(x, z, 2.2)) continue;
+      out.push({
+        x,
+        z,
+        rx: 2.2 + r() * 4.5,
+        ry: 0.5 + r() * 0.85,
+        rot: r() * 6.28,
+        c: tone[Math.floor(r() * tone.length)],
+      });
+    }
+    return out;
+  }, [blocked]);
+
+  /** Овцы на лугу — по референсу пасутся вокруг деревни. */
+  const sheep = useMemo(() => {
+    const r = rng(88);
+    return ([
+      [-5.9, 2.6], [-6.6, 3.6], [-5.2, 4.2],
+      [0.4, 9.4], [1.6, 10.3],
+      [5.4, -2.4], [4.6, -3.4],
+      [-1.2, -8.6], [0.2, -9.4],
+    ] as [number, number][])
+      .map(([u, f]) => {
+        const [x, z] = spot(u, f);
+        return { x, z, rot: r() * 6.28, scale: 1.15 + r() * 0.35 };
+      })
+      .filter((s) => !blocked(s.x, s.z, 0.7));
+  }, [blocked]);
 
   /**
    * Кварталы домиков. Стоят в промежутках между улицами — «объекты в разных
@@ -388,37 +661,55 @@ export const Terrain = memo(function Terrain() {
    * дальние уходят к горизонту и дают городу глубину.
    */
   const houses = useMemo<HouseSpec[]>(() => {
-    const WALLS = ['#f0e6d2', '#e6d9bd', '#f4ece0', '#e3d3b8', '#efe1c9'];
-    const ROOFS = ['#c05a48', '#a94c3d', '#8e6a52', '#b2543f', '#7f6a8e'];
+    const WALLS = ['#f2e7cd', '#ecdcbe', '#f6efdf', '#e7d6b6', '#f0e2c6'];
+    const ROOFS = ['#4b4457', '#7a4436', '#3f4a58', '#8a5340', '#5a4a63'];
     const raw: [number, number, number, number][] = [
       // x, z, поворот, масштаб
       [-6.2, -2.4, 0.5, 1.0], [-7.4, -1.0, 0.4, 0.85], [-6.6, -6.2, 0.7, 0.9],
       [6.6, 2.6, -0.4, 1.0], [7.6, 1.2, -0.5, 0.86], [7.2, 5.4, -0.3, 0.92],
       [-4.4, 4.6, 1.1, 0.95], [-6.0, 5.8, 1.0, 0.82], [-2.8, 6.2, 0.9, 0.88],
       [4.2, -4.6, -1.2, 0.96], [5.6, -5.9, -1.1, 0.84], [2.9, -6.4, -0.9, 0.9],
-      [-1.4, 8.4, 0.2, 0.9], [1.6, 8.9, -0.2, 0.86], [0.2, 10.4, 0.1, 0.8],
+      // у нижней кромки кадра домов нет: там передний план отдан деревьям,
+      // иначе обрезанная краем экрана крыша закрывает полгорода
       [-0.6, -9.2, 0.15, 0.9], [2.2, -9.8, -0.25, 0.84],
       [8.6, -1.6, -0.8, 0.88], [-8.8, 1.8, 0.8, 0.9],
+      [-9.6, -3.4, 0.6, 0.92], [-8.2, 6.8, 0.9, 0.86],
     ];
-    return raw.map(([x, z, rot, k], i) => ({
-      x,
-      z,
-      rot,
-      w: 1.1 * k,
-      h: (0.9 + (i % 3) * 0.22) * k,
-      d: 0.95 * k,
-      wall: WALLS[i % WALLS.length],
-      roof: ROOFS[(i * 3) % ROOFS.length],
-    }));
+    return raw
+      .filter(([x, z]) => distanceToRiver(x, z) > 1.6)
+      .map(([x, z, rot, k], i) => ({
+        x,
+        z,
+        rot,
+        w: 1.1 * k,
+        h: (0.9 + (i % 3) * 0.22) * k,
+        d: 0.95 * k,
+        wall: WALLS[i % WALLS.length],
+        roof: ROOFS[(i * 3) % ROOFS.length],
+      }));
   }, []);
 
+  // изгороди и заборы отсеиваются по реке — иначе живая изгородь встаёт
+  // поперёк русла и висит зелёной доской над водой
   const hedges = useMemo(
-    () => [
-      { x: -6.6, z: 0.4, rot: 0.35, len: 2.2 },
-      { x: 6.9, z: -2.6, rot: -0.35, len: 2.2 },
-      { x: -3.4, z: 8.0, rot: 0.1, len: 1.8 },
-      { x: 1.9, z: -7.6, rot: 0.1, len: 1.8 },
-    ],
+    () =>
+      [
+        { x: -6.6, z: 0.4, rot: 0.35, len: 2.2 },
+        { x: 6.9, z: -2.6, rot: -0.35, len: 2.2 },
+        { x: -3.4, z: 8.0, rot: 0.1, len: 1.8 },
+        { x: 1.9, z: -7.6, rot: 0.1, len: 1.8 },
+      ].filter((h) => distanceToRiver(h.x, h.z) > h.len * 0.6 + 0.3),
+    [],
+  );
+
+  const fences = useMemo(
+    () =>
+      ([
+        [[7.4, -6.6], [10.4, -6]],
+        [[-7.4, 4.6], [-5.4, 6.8]],
+      ] as [[number, number], [number, number]][]).filter(
+        ([a, b]) => distanceToRiver(a[0], a[1]) > 0.6 && distanceToRiver(b[0], b[1]) > 0.6,
+      ),
     [],
   );
 
@@ -426,56 +717,57 @@ export const Terrain = memo(function Terrain() {
     <group>
       {/* Большая земля (края уходят за экран) */}
       <mesh receiveShadow position={[0, -1, 0]}>
-        <boxGeometry args={[72, 2, 72]} />
-        <meshStandardMaterial color="#6cae3c" roughness={1} />
+        <boxGeometry args={[WORLD_HALF * 2, 2, WORLD_HALF * 2]} />
+        <meshStandardMaterial color={GRASS.base} roughness={1} />
       </mesh>
+
+      {/* Тёмная подстилка под лесом — стена деревьев не должна стоять на
+          светлой газонной траве, иначе лес читается декорацией, а не лесом.
+          Разница с поляной небольшая: заметный перепад читался бы циркульной
+          дугой поперёк луга, а её ломают только бугры. */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, GRASS_Y + 0.004, 0]} receiveShadow>
+        <ringGeometry args={[CLEARING_R - 1, FOREST_R + 10, 64]} />
+        <meshStandardMaterial color={GRASS.dark} roughness={1} />
+      </mesh>
+
+      {/* Поляна: светлое пятно травы, на котором стоит город */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, GRASS_Y + 0.006, 0]} receiveShadow>
+        <circleGeometry args={[CLEARING_R + 0.4, 56]} />
+        <meshStandardMaterial color={GRASS.light} roughness={1} />
+      </mesh>
+
       {/* лёгкие поляны-пятна для разнообразия */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-7, GRASS_Y + 0.01, -4]} receiveShadow>
-        <circleGeometry args={[6, 40]} />
-        <meshStandardMaterial color="#74b943" roughness={1} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-6, GRASS_Y + 0.008, -3.5]} receiveShadow>
+        <circleGeometry args={[4.5, 40]} />
+        <meshStandardMaterial color={GRASS.base} roughness={1} />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[8, GRASS_Y + 0.01, 7]} receiveShadow>
-        <circleGeometry args={[5.5, 40]} />
-        <meshStandardMaterial color="#63a538" roughness={1} />
-      </mesh>
-      {/* земляные проплешины под декором */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-10, GRASS_Y + 0.008, -8]} receiveShadow>
-        <circleGeometry args={[2.4, 24]} />
-        <meshStandardMaterial color="#8a7a4e" roughness={1} />
-      </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[12, GRASS_Y + 0.008, 6]} receiveShadow>
-        <circleGeometry args={[2, 24]} />
-        <meshStandardMaterial color="#8a7a4e" roughness={1} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[6.5, GRASS_Y + 0.008, 6]} receiveShadow>
+        <circleGeometry args={[4, 40]} />
+        <meshStandardMaterial color={GRASS.dark} roughness={1} />
       </mesh>
 
-      {/* Холмы по краям — глубина, как в деревенском референсе */}
-      <Hill position={[-20, -1.5, -16]} scale={[9, 5, 9]} color="#4f9330" />
-      <Hill position={[18, -1.5, -20]} scale={[11, 6, 11]} color="#57a038" />
-      <Hill position={[24, -1, 8]} scale={[8, 4, 8]} color="#4a8c2c" />
-      <Hill position={[-22, -1.5, 14]} scale={[10, 5.5, 10]} color="#539a34" />
-      <Hill position={[-6, -1, -24]} scale={[9, 5, 9]} color="#4d9130" />
-      <Hill position={[6, -1, 24]} scale={[8, 4.5, 8]} color="#519734" />
-      <Hill position={[-28, -1, -4]} scale={[10, 5, 10]} color="#4b8f2e" />
-      <Hill position={[28, -1.5, -6]} scale={[9, 4.5, 9]} color="#55a036" />
+      {/* мягкий рельеф поля */}
+      <MoundField items={mounds} />
 
-      {/* Пруды по миру */}
-      <Pond position={[9, GRASS_Y, -4]} r={2.2} />
-      <Pond position={[-9, GRASS_Y, 8]} r={1.8} />
+      {/* Река справа от города */}
+      <River />
+
+      {/* Лес: стена вокруг поляны и кулисы переднего плана */}
+      <ConiferField items={forest.conifers.concat(foreground, inTown)} />
+      <TreeField items={forest.trees} />
+      <BushField items={forest.bushes.concat(decor.bushItems)} />
 
       {/* Кварталы домиков — то, что делает карту городом */}
       <HouseBlocks items={houses} />
       <HedgeRow items={hedges} />
 
-      {/* Деревья, ёлки, кусты и камни */}
-      <TreeField items={decor.treeItems} />
-      <ConiferField items={decor.coniferItems} />
-      <BushField items={decor.bushItems} />
       <StoneField items={decor.stoneItems} />
 
       {/* Мелочь для рассматривания */}
       <FlowerField items={decor.flowerItems} />
       <GrassField items={decor.tuftItems} />
       <MushroomField items={decor.mushroomItems} />
+      <SheepField items={sheep} />
 
       {/* Фонтан у подножия ратуши и фонари вдоль всех шести улиц */}
       <Fountain position={[TOWN_CENTER[0] + PLAZA_R * 0.62, GRASS_Y, TOWN_CENTER[1] + PLAZA_R * 0.62]} />
@@ -485,8 +777,9 @@ export const Terrain = memo(function Terrain() {
       {city.benches.map((b, i) => (
         <Bench key={i} position={b.position} rotation={b.rotation} />
       ))}
-      <Fence from={[7.4, -6.6]} to={[10.4, -6]} />
-      <Fence from={[-7.4, 4.6]} to={[-5.4, 6.8]} />
+      {fences.map(([from, to], i) => (
+        <Fence key={i} from={from} to={to} />
+      ))}
 
       {/* парящая пыльца на солнце */}
       <Motes count={24} area={26} />

@@ -17,7 +17,7 @@
 
 import { Suspense, useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Environment, Html, Lightformer, PerformanceMonitor, SoftShadows } from '@react-three/drei';
+import { Environment, Html, Lightformer, PerformanceMonitor } from '@react-three/drei';
 import * as THREE from 'three';
 import type { Category } from '../api';
 import { formatDuration } from '../lib/format';
@@ -40,7 +40,8 @@ import { StationSign } from './Props3D';
 import { Character3D } from './Character3D';
 import { TownHall } from './TownHall';
 import { CityPavement, VacantLot } from './City';
-import { CITY_AZIM, CITY_HALF_F, CITY_HALF_U, CITY_SLOTS, TOWN_CENTER } from './cityLayout';
+import { CITY_AZIM, CITY_HALF_F, CITY_HALF_U, CITY_SLOTS, spot, TOWN_CENTER } from './cityLayout';
+import { SAND } from './worldPalette';
 
 /** Что показываем: карту, нырок в зону, её интерьер или подъём наружу. */
 export type SceneView = 'map' | 'dive' | 'inside' | 'rise';
@@ -113,12 +114,32 @@ const ZONE_3D: Record<
 };
 
 const DEG = Math.PI / 180;
-/** Обзорный кадр: наклон, поворот и угол зрения камеры карты. */
-const CAM_FOV = 52;
-const CAM_ELEV = 46 * DEG;
+/**
+ * Обзорный кадр: наклон, поворот и угол зрения камеры карты.
+ *
+ * Ракурс снят с референса: наклон ПОЛОГИЙ (по круглым площадкам зон видно, что
+ * их эллипс сплюснут примерно вдвое — это ≈35° над землёй, а не 46°, как было),
+ * а объектив ДЛИННЫЙ. Узкий угол зрения при большом отдалении — это и есть
+ * «диорама»: перспектива почти не заваливает дома у краёв кадра, зато видно
+ * фасады, а не крыши сверху.
+ */
+const CAM_FOV = 34;
+const CAM_ELEV = 35 * DEG;
 const CAM_AZIM = CITY_AZIM;
 /** Доля высоты экрана, отданная городу (сверху сводка, снизу таб-бар). */
 const WORLD_BAND = 0.74;
+
+/**
+ * Куда целится камера — точка чуть ДАЛЬШЕ центра города по глубине кадра.
+ * Город от этого съезжает вниз к середине экрана: если целиться ровно в
+ * площадь, снизу остаётся широкая пустая полоса луга, а сверху город почти
+ * упирается в сводку.
+ */
+const FRAME_SHIFT_F = -1.4;
+const FRAME_FOCUS: [number, number] = (() => {
+  const [dx, dz] = spot(0, FRAME_SHIFT_F);
+  return [TOWN_CENTER[0] + dx, TOWN_CENTER[1] + dz];
+})();
 
 /**
  * Кадр статичной карты. Считается по НЕИЗМЕННЫМ габаритам города, а не по
@@ -128,17 +149,28 @@ const WORLD_BAND = 0.74;
  *     размером в пикселях, у крайней станции её обрезало краем экрана);
  *   • по глубине — модель ратуши и высокие станции, которые уходят вверх.
  */
-function fitFrame(aspect: number) {
-  const halfW = CITY_HALF_U + 1.75;
+function fitFrame(aspect: number, widthPx: number) {
+  /**
+   * Запас по ширине считается В ПИКСЕЛЯХ, а не в юнитах мира: подпись станции
+   * рисуется постоянным размером на экране, поэтому на узком телефоне она
+   * съедает заметно бо́льшую долю кадра, чем на планшете. Фиксированный запас
+   * либо резал подпись крайней станции о край экрана (на 430 px), либо зря
+   * отодвигал камеру (на широком).
+   */
+  const LABEL_HALF_PX = 62;
+  const k = Math.min(0.4, LABEL_HALF_PX / Math.max(120, widthPx / 2));
+  const halfW = CITY_HALF_U / (1 - k);
   const halfD = CITY_HALF_F + 1.9;
   const tanV = Math.tan((CAM_FOV / 2) * DEG);
   const byWidth = halfW / (tanV * Math.max(0.35, aspect));
   const byDepth = ((halfD / WORLD_BAND) * Math.sin(CAM_ELEV)) / tanV;
-  const dist = Math.min(40, Math.max(9, Math.max(byWidth, byDepth)));
+  // потолок отдаления вырос вместе с длинным объективом: при fov 34 обзорный
+  // кадр набирается с ~30 юнитов, старый предел в 40 срезал бы его на широком экране
+  const dist = Math.min(70, Math.max(9, Math.max(byWidth, byDepth)));
   const pos: [number, number, number] = [
-    TOWN_CENTER[0] + dist * Math.cos(CAM_ELEV) * Math.sin(CAM_AZIM),
+    FRAME_FOCUS[0] + dist * Math.cos(CAM_ELEV) * Math.sin(CAM_AZIM),
     dist * Math.sin(CAM_ELEV),
-    TOWN_CENTER[1] + dist * Math.cos(CAM_ELEV) * Math.cos(CAM_AZIM),
+    FRAME_FOCUS[1] + dist * Math.cos(CAM_ELEV) * Math.cos(CAM_AZIM),
   ];
   return { pos, dist };
 }
@@ -146,6 +178,7 @@ function fitFrame(aspect: number) {
 /** Кадр по умолчанию — для первой отрисовки Canvas до того, как известен размер. */
 const INITIAL_FRAME = fitFrame(
   typeof window === 'undefined' ? 0.46 : window.innerWidth / Math.max(1, window.innerHeight),
+  typeof window === 'undefined' ? 430 : window.innerWidth,
 );
 
 /**
@@ -157,9 +190,9 @@ function FitCamera({ enabled }: { enabled: boolean }) {
   const size = useThree((s) => s.size);
   useEffect(() => {
     if (!enabled) return;
-    const { pos } = fitFrame(size.width / Math.max(1, size.height));
+    const { pos } = fitFrame(size.width / Math.max(1, size.height), size.width);
     camera.position.set(pos[0], pos[1], pos[2]);
-    camera.lookAt(TOWN_CENTER[0], 0.5, TOWN_CENTER[1]);
+    camera.lookAt(FRAME_FOCUS[0], 0.5, FRAME_FOCUS[1]);
     camera.updateProjectionMatrix();
   }, [camera, size.width, size.height, enabled]);
   return null;
@@ -206,6 +239,14 @@ function Station({
   const labelY = zone ? zone.labelY(level) : 2.1;
   return (
     <group position={[pos[0], GRASS_Y, pos[1]]}>
+      {/* Вытоптанная земля под станцией: площадка зоны должна стоять на грунте,
+          а не быть блюдцем, воткнутым в газон (как на референсе). Радиус —
+          по самой площадке зоны (у всех она радиусом 1.72 до масштаба) плюс
+          узкая кромка: широкий песчаный ореол превращал поляну в пустыню. */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, GRASS_Y + 0.01, 0]} receiveShadow>
+        <circleGeometry args={[1.72 * scale + 0.24, 36]} />
+        <meshStandardMaterial color={SAND} roughness={1} />
+      </mesh>
       <group
         scale={scale}
         onClick={(e) => {
@@ -374,40 +415,55 @@ function SceneContents({
   return (
     <>
       <color attach="background" args={['#bfe6ff']} />
-      <fog attach="fog" args={['#cdeeff', 34, 64]} />
+      {/* дымка только у самого горизонта: лес по краям кадра должен оставаться
+          насыщенным, как на референсе, а не уходить в молоко. Пороги подняты
+          вслед за камерой: с длинным объективом она стоит втрое дальше, и
+          прежние 42/88 накрывали дымкой сам город. */}
+      <fog attach="fog" args={['#cfe8d6', 62, 120]} />
 
-      {/* Мягкие полутени. Карта статична, поэтому качество теней подняли:
-          samples 10 вместо 6 — полутень мягче и чище, а платим за это тем, что
-          освободилось от выключенного перетаскивания. */}
-      <SoftShadows size={16} samples={10} focus={0.75} />
-
-      <hemisphereLight args={['#dcefff', '#6b8a54', 0.5]} />
-      <ambientLight intensity={0.32} />
+      {/*
+        ЦВЕТОКОР по референсу строится на РАСХОЖДЕНИИ тёплого и холодного:
+        солнце золотое, а вся заливка — небо, ambient, контровой — синеватая.
+        Тогда освещённая грань уходит в тёплую зелень, а тень в синеву, и
+        картинка выглядит цветной, а не просто «зелёной посветлее/потемнее».
+        Заливки намеренно мало: она не затеняется, и каждая её доля делает тень
+        бледнее — а на референсе тень глубокая.
+      */}
+      <hemisphereLight args={['#b3d8ff', '#547f2c', 0.3]} />
+      <ambientLight intensity={0.1} color="#9cbde4" />
+      {/* Солнце — сзади-справа от зрителя и НЕВЫСОКО над горизонтом, как на
+          референсе: тени ложатся влево и НА камеру и получаются длиной с сам
+          дом. Отвесное солнце давало короткий тёмный пятачок под объектом —
+          при взгляде сверху его почти не видно, и картинка казалась плоской. */}
       <directionalLight
-        position={[11, 16, 9]}
-        intensity={1.8}
-        color="#fff1d0"
+        position={[11, 12.5, -8]}
+        intensity={2.5}
+        color="#ffdf9e"
         castShadow
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
-        shadow-bias={-0.0004}
+        shadow-bias={-0.0002}
+        shadow-normalBias={0.02}
         shadow-camera-near={0.5}
         shadow-camera-far={70}
-        shadow-camera-left={-14}
-        shadow-camera-right={14}
-        shadow-camera-top={14}
-        shadow-camera-bottom={-14}
+        shadow-camera-left={-16}
+        shadow-camera-right={16}
+        shadow-camera-top={16}
+        shadow-camera-bottom={-16}
       />
       {/* холодная подсветка с теневой стороны — объём */}
-      <directionalLight position={[-9, 7, -7]} intensity={0.38} color="#bcd8ff" />
+      <directionalLight position={[-9, 6, 8]} intensity={0.5} color="#a6c9f5" />
 
       {/* мягкое студийное окружение в самой сцене (без загрузки HDR) —
           даёт матовым материалам реалистичный «глиняный» отлив и блики */}
+      {/* Окружение приглушено: оно даёт материалам «глиняный» отлив, но если
+          светить им в полную силу, оно же заливает светом теневые бока и тени
+          перестают читаться — а на референсе они глубокие. */}
       <Environment resolution={128} frames={1}>
-        <Lightformer intensity={1.6} color="#fff3dc" position={[6, 10, 4]} scale={[10, 10, 1]} />
-        <Lightformer intensity={0.7} color="#cfe8ff" rotation-x={Math.PI / 2} position={[0, 12, 0]} scale={[24, 24, 1]} />
-        <Lightformer intensity={0.5} color="#dff0d8" position={[-8, 3, -10]} scale={[16, 8, 1]} />
-        <Lightformer intensity={0.45} color="#ffe6c2" position={[10, 2, 8]} scale={[12, 6, 1]} />
+        <Lightformer intensity={0.55} color="#fff3dc" position={[6, 10, 4]} scale={[10, 10, 1]} />
+        <Lightformer intensity={0.25} color="#cfe8ff" rotation-x={Math.PI / 2} position={[0, 12, 0]} scale={[24, 24, 1]} />
+        <Lightformer intensity={0.18} color="#dff0d8" position={[-8, 3, -10]} scale={[16, 8, 1]} />
+        <Lightformer intensity={0.16} color="#ffe6c2" position={[10, 2, 8]} scale={[12, 6, 1]} />
       </Environment>
 
       <Terrain />
@@ -468,10 +524,21 @@ export function HomeScene(props: HomeSceneProps) {
 
   return (
     <Canvas
-      shadows
+      /**
+       * Мягкие тени средствами самого three (PCFSoft), без PCSS из drei.
+       * PCSS считает ширину полутени от размера теневой камеры, а у карты она
+       * большая (весь город) — тень размазывало в незаметное пятно, и картинка
+       * получалась плоской. На референсе тень мягкая, но ЧИТАЕТСЯ.
+       */
+      shadows="soft"
       dpr={[1, 2]}
       camera={{ position: INITIAL_FRAME.pos, fov: CAM_FOV }}
-      gl={{ antialias: true }}
+      /**
+       * Тон-маппинг линейный, а не ACES. ACES «киношно» приглушает насыщенность
+       * и подтягивает тени — из-за него трава уходила в блёкло-серый, а тень
+       * почти пропадала. Референс же плакатно-цветной, с чистой зеленью.
+       */
+      gl={{ antialias: true, toneMapping: THREE.LinearToneMapping, toneMappingExposure: 1.05 }}
       // карта не двигается — жесты по холсту не перехватываем, страница живёт как обычно
       style={{ touchAction: 'manipulation' }}
     >
