@@ -259,9 +259,9 @@ export interface TreeSpec {
  * пластиковый шарик.
  */
 const TREE_TONES: string[][] = [
-  ['#3f8f2f', '#4a9e37', '#56ad41', '#357f28'],
-  ['#4c9a34', '#59ab3e', '#66ba49', '#42892d'],
-  ['#357c2b', '#3f8b33', '#4a9a3c', '#2e6f25'],
+  ['#4d9f37', '#59ae40', '#66bd4a', '#438f30'],
+  ['#5aaa3c', '#67bb46', '#75ca52', '#4f9935'],
+  ['#428d31', '#4d9c3a', '#59ab44', '#3a802b'],
 ];
 const TREE_BLOBS: { p: [number, number, number]; s: [number, number, number] }[] = [
   { p: [0, 0, 0], s: [1, 0.9, 1] },
@@ -317,11 +317,16 @@ const CONIFER_TIERS: { y: number; r: number; h: number }[] = [
   { y: 1.64, r: 0.44, h: 0.92 },
   { y: 2.08, r: 0.30, h: 0.80 },
 ];
+/**
+ * Оттенки хвои. Подняты по светлоте: на телефоне сплошная стена тёмных ёлок
+ * читалась глухим тёмным пятном на треть кадра, а на референсе лес живой —
+ * у каждого яруса свой тон, и разброс между деревьями заметен.
+ */
 const CONIFER_TONES: string[][] = [
-  ['#1f5f2c', '#276e34', '#2f7d3c', '#388c45'],
-  ['#27692f', '#2f7838', '#378741', '#40964a'],
-  ['#18512a', '#1f6031', '#276f39', '#2f7e41'],
-  ['#2d7238', '#358141', '#3e904a', '#479f53'],
+  ['#2b7a38', '#338943', '#3c984c', '#45a755'],
+  ['#338544', '#3b944d', '#44a356', '#4db25f'],
+  ['#246d33', '#2c7c3c', '#348b45', '#3d9a4e'],
+  ['#3a8f46', '#439e50', '#4cad59', '#55bc62'],
 ];
 
 export function ConiferField({ items, castShadow = true }: { items: TreeSpec[]; castShadow?: boolean }) {
@@ -387,6 +392,102 @@ export function BushField({ items }: { items: TreeSpec[] }) {
         <meshStandardMaterial roughness={1} flatShading />
       </Layer>
     </group>
+  );
+}
+
+/* ─────────────────────────── Пни и валежник ─────────────────────────── */
+
+/**
+ * Пни и поваленные стволы — то, что превращает ровный зелёный ковёр под
+ * деревьями в лесную подстилку. На референсе взгляд цепляется именно за такую
+ * мелочь, а не за саму траву.
+ */
+export interface LogSpec {
+  x: number;
+  z: number;
+  rot: number;
+  scale: number;
+  /** true — лежачий ствол, false — пень с годовыми кольцами */
+  fallen: boolean;
+}
+
+export function LogField({ items }: { items: LogSpec[] }) {
+  const parts = useMemo(() => {
+    const trunks: Placed[] = [];
+    const rings: Placed[] = [];
+    const mossy: Placed[] = [];
+    for (const l of items) {
+      const root = {
+        p: [l.x, GRASS_Y, l.z] as [number, number, number],
+        r: [0, l.rot, 0] as [number, number, number],
+        s: l.scale,
+      };
+      if (l.fallen) {
+        // лежачий ствол чуть утоплен в землю и слегка завален набок
+        trunks.push({ m: chain(root, { p: [0, 0.13, 0], r: [Math.PI / 2, 0, 0.06], s: [1, 2.6, 1] }), c: '#7a5230' });
+        rings.push({ m: chain(root, { p: [0, 0.13, 0.4], r: [Math.PI / 2, 0, 0.06], s: [1.02, 0.04, 1.02] }), c: '#c6a175' });
+        mossy.push({ m: chain(root, { p: [0.06, 0.24, -0.15], s: [0.9, 0.5, 1.5] }), c: '#4a8f2e' });
+      } else {
+        trunks.push({ m: chain(root, { p: [0, 0.16, 0], s: [1.2, 0.7, 1.2] }), c: '#7a5230' });
+        rings.push({ m: chain(root, { p: [0, 0.32, 0], s: [1.16, 0.04, 1.16] }), c: '#c6a175' });
+      }
+    }
+    return { trunks, rings, mossy };
+  }, [items]);
+  return (
+    <group>
+      <Layer items={parts.trunks} castShadow receiveShadow>
+        <cylinderGeometry args={[0.16, 0.19, 0.32, 8]} />
+        <meshStandardMaterial roughness={1} flatShading />
+      </Layer>
+      <Layer items={parts.rings}>
+        <cylinderGeometry args={[0.16, 0.16, 1, 8]} />
+        <meshStandardMaterial roughness={0.95} />
+      </Layer>
+      {/* моховая шапка на валежнике */}
+      <Layer items={parts.mossy} castShadow>
+        <icosahedronGeometry args={[0.16, 0]} />
+        <meshStandardMaterial roughness={1} flatShading />
+      </Layer>
+    </group>
+  );
+}
+
+/* ─────────────────────────── Папоротник ─────────────────────────── */
+
+/**
+ * Куст папоротника: несколько разлапистых вай веером. Дешёвый способ занять
+ * лесную подстилку чем-то, кроме травы, — на референсе подлесок именно такой,
+ * рваный по силуэту.
+ */
+export function FernField({ items }: { items: { x: number; z: number; scale: number; rot: number }[] }) {
+  const fronds = useMemo(() => {
+    const out: Placed[] = [];
+    for (const f of items) {
+      const root = {
+        p: [f.x, GRASS_Y, f.z] as [number, number, number],
+        r: [0, f.rot, 0] as [number, number, number],
+        s: f.scale,
+      };
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        out.push({
+          m: chain(root, {
+            p: [Math.cos(a) * 0.12, 0.16, Math.sin(a) * 0.12],
+            r: [Math.cos(a) * 0.5, -a, Math.sin(a) * 0.5],
+            s: [0.1, 0.34, 0.3],
+          }),
+          c: i % 2 ? '#3f8b2a' : '#4c9d33',
+        });
+      }
+    }
+    return out;
+  }, [items]);
+  return (
+    <Layer items={fronds} castShadow>
+      <coneGeometry args={[1, 1, 4]} />
+      <meshStandardMaterial roughness={1} flatShading />
+    </Layer>
   );
 }
 

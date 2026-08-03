@@ -20,10 +20,11 @@ import {
   BushField,
   ConiferField,
   Fence,
+  FernField,
   FlowerField,
   GrassField,
   LampPost,
-  Motes,
+  LogField,
   MoundField,
   MushroomField,
   rng,
@@ -33,6 +34,7 @@ import {
   StoneField,
   TreeField,
   type FlowerSpec,
+  type LogSpec,
   type StoneSpec,
   type TreeSpec,
   type TuftSpec,
@@ -619,6 +621,50 @@ export const Terrain = memo(function Terrain() {
       }
     }
 
+    /**
+     * Лесная подстилка — от кромки поляны и вглубь леса. Ровный зелёный ковёр
+     * под деревьями и был той «нехваткой текстуры»: сами деревья детальные, а
+     * земля между ними пустая. Всё это инстансы, так что густоты можно не
+     * жалеть — цена в вызовах отрисовки нулевая.
+     */
+    const fernItems: { x: number; z: number; scale: number; rot: number }[] = [];
+    const logItems: LogSpec[] = [];
+    // радиус берётся ЛИНЕЙНО, а не по площади: равномерная по площади россыпь
+    // уходит в дальние кольца, где её всё равно закрывают кроны, а пустой
+    // остаётся как раз ближняя опушка — та, что в кадре крупнее всего
+    for (let i = 0; i < 1200; i++) {
+      const a = rand() * Math.PI * 2;
+      const rad = CLEARING_R - 1.6 + rand() * 18;
+      const x = Math.cos(a) * rad;
+      const z = Math.sin(a) * rad;
+      if (blocked(x, z, 0.7)) continue;
+      const roll = rand();
+      if (roll < 0.4) tuftItems.push({ x, z, scale: 1 + rand() * 1, seedX: x, seedZ: z });
+      else if (roll < 0.6) fernItems.push({ x, z, scale: 0.9 + rand() * 0.8, rot: rand() * 6.28 });
+      else if (roll < 0.72) bushItems.push({ x, z, scale: 0.5 + rand() * 0.5, rot: rand() * 6.28 });
+      else if (roll < 0.8) {
+        flowerItems.push({
+          x,
+          z,
+          color: ['#f6d24b', '#ffffff', '#e86ca8', '#9d7bea'][Math.floor(rand() * 4)],
+          scale: 0.9 + rand() * 0.6,
+          rot: rand() * 6.28,
+        });
+      } else if (roll < 0.87) {
+        mushroomItems.push({ x, z, scale: 0.8 + rand() * 0.6 });
+      } else if (roll < 0.95) {
+        const s = 0.09 + rand() * 0.22;
+        stoneItems.push({
+          p: [x, GRASS_Y + s * 0.35, z],
+          s: [s * 1.5, s, s * 1.2],
+          r: [rand() * 3, rand() * 3, rand() * 3],
+          c: rand() > 0.5 ? '#9e9683' : '#8d8674',
+        });
+      } else {
+        logItems.push({ x, z, rot: rand() * 6.28, scale: 0.9 + rand() * 0.6, fallen: rand() > 0.45 });
+      }
+    }
+
     // Отступы небольшие: мелочь должна подходить к самой кромке дороги и
     // площадки станции, иначе вокруг каждой зоны появляется пустое кольцо.
     const clear = <T extends { x: number; z: number }>(items: T[], r: number) =>
@@ -630,6 +676,8 @@ export const Terrain = memo(function Terrain() {
       stoneItems: stoneItems.filter((s) => !blocked(s.p[0], s.p[2], 0.7)),
       flowerItems: clear(flowerItems, 0.7),
       tuftItems: clear(tuftItems, 0.7),
+      fernItems,
+      logItems,
     };
   }, [blocked]);
 
@@ -641,7 +689,7 @@ export const Terrain = memo(function Terrain() {
     const r = rng(3311);
     const tone = [GRASS.light, GRASS.dark, GRASS.base, GRASS.moss];
     const out: { x: number; z: number; rx: number; ry: number; rot: number; c: string }[] = [];
-    for (let i = 0; i < 90; i++) {
+    for (let i = 0; i < 170; i++) {
       const a = r() * Math.PI * 2;
       const rad = 5 + Math.sqrt(r()) * 30;
       const x = Math.cos(a) * rad;
@@ -736,18 +784,14 @@ export const Terrain = memo(function Terrain() {
 
   return (
     <group>
-      {/* Большая земля (края уходят за экран) */}
+      {/*
+        Большая земля (края уходят за экран). Красится СРАЗУ в цвет лесной
+        подстилки. Раньше под лесом лежало отдельное тёмное кольцо, а земля за
+        его кромкой оставалась светлее — и на широком экране, где видно далеко,
+        эта кромка читалась ровной светлой полосой поперёк всего кадра.
+      */}
       <mesh receiveShadow position={[0, -1, 0]}>
         <boxGeometry args={[WORLD_HALF * 2, 2, WORLD_HALF * 2]} />
-        <meshStandardMaterial color={GRASS.base} roughness={1} />
-      </mesh>
-
-      {/* Тёмная подстилка под лесом — стена деревьев не должна стоять на
-          светлой газонной траве, иначе лес читается декорацией, а не лесом.
-          Разница с поляной небольшая: заметный перепад читался бы циркульной
-          дугой поперёк луга, а её ломают только бугры. */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, GRASS_Y + 0.004, 0]} receiveShadow>
-        <ringGeometry args={[CLEARING_R - 1, FOREST_R + 10, 64]} />
         <meshStandardMaterial color={GRASS.dark} roughness={1} />
       </mesh>
 
@@ -796,6 +840,8 @@ export const Terrain = memo(function Terrain() {
       {/* Мелочь для рассматривания */}
       <FlowerField items={decor.flowerItems} />
       <GrassField items={decor.tuftItems} />
+      <FernField items={decor.fernItems} />
+      <LogField items={decor.logItems} />
       <MushroomField items={decor.mushroomItems} />
       <SheepField items={sheep} />
 
@@ -810,9 +856,6 @@ export const Terrain = memo(function Terrain() {
       {fences.map(([from, to], i) => (
         <Fence key={i} from={from} to={to} />
       ))}
-
-      {/* парящая пыльца на солнце */}
-      <Motes count={24} area={26} />
     </group>
   );
 });

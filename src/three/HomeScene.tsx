@@ -440,7 +440,7 @@ function SceneContents({
         Заливки намеренно мало: она не затеняется, и каждая её доля делает тень
         бледнее — а на референсе тень глубокая.
       */}
-      <hemisphereLight args={['#b3d8ff', '#547f2c', 0.3]} />
+      <hemisphereLight args={['#b3d8ff', '#5f8f33', 0.4]} />
       <ambientLight intensity={0.1} color="#9cbde4" />
       {/* Солнце — сзади-справа от зрителя и НЕВЫСОКО над горизонтом, как на
           референсе: тени ложатся влево и НА камеру и получаются длиной с сам
@@ -557,7 +557,8 @@ export function HomeScene(props: HomeSceneProps) {
         // разрешение и приходилось ронять. Сглаживаем только там, где dpr = 1.
         antialias: FULL_DPR < 1.75,
         toneMapping: THREE.LinearToneMapping,
-        toneMappingExposure: 1.05,
+        // экспозиция поднята: на телефоне картинка читалась тускловатой
+        toneMappingExposure: 1.22,
       }}
       // карта не двигается — жесты по холсту не перехватываем, страница живёт как обычно
       style={{ touchAction: 'manipulation' }}
