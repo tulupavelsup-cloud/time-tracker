@@ -54,9 +54,15 @@ export const GRASS_Y = 0;
 /** Докуда тянется земля и лес (мир заведомо шире любого кадра). */
 const WORLD_HALF = 52;
 /** Радиус поляны: внутри него леса нет — там живёт город. */
-const CLEARING_R = 7.4;
+const CLEARING_R = 8.2;
 /** Докуда сажаем лес. */
 const FOREST_R = 34;
+/**
+ * Радиус, внутри которого объект ещё попадает в теневую карту. Теневая камера
+ * направленного света накрывает ±16 вокруг центра города (см. HomeScene) — всё,
+ * что дальше, тени всё равно не отбрасывает.
+ */
+const SHADOW_R = 18;
 
 /* ───────────────────────── река ───────────────────────── */
 
@@ -433,8 +439,20 @@ export const Terrain = memo(function Terrain() {
     };
   }, [city.samples]);
 
-  /** Лес — главный герой картинки. Сажается один раз. */
-  const forest = useMemo(() => plantForest(blocked), [blocked]);
+  /**
+   * Лес — главный герой картинки. Сажается один раз и сразу делится на
+   * ближний (попадает в теневую карту) и дальний (не попадает, а значит и
+   * гонять его через теневой проход незачем).
+   */
+  const forest = useMemo(() => {
+    const { conifers, trees, bushes } = plantForest(blocked);
+    const near = (t: TreeSpec) => t.x * t.x + t.z * t.z <= SHADOW_R * SHADOW_R;
+    return {
+      conifers: { near: conifers.filter(near), far: conifers.filter((t) => !near(t)) },
+      trees: { near: trees.filter(near), far: trees.filter((t) => !near(t)) },
+      bushes,
+    };
+  }, [blocked]);
 
   /**
    * Кулисы переднего плана — деревья у самой нижней кромки кадра, как на
@@ -448,13 +466,15 @@ export const Terrain = memo(function Terrain() {
   const foreground = useMemo<TreeSpec[]>(() => {
     const r = rng(4);
     return ([
-      [-3.35, 9.6], [-3.9, 8.5], [-4.0, 6.6],
-      [3.45, 9.6], [4.0, 8.5], [4.1, 6.6],
-    ] as [number, number][]).map(([u, f], i) => {
-      const [x, z] = spot(u, f);
-      return { x, z, scale: 1.25 + (i % 3) * 0.25 + r() * 0.3, rot: r() * 6.28, tone: Math.floor(r() * 4) };
-    });
-  }, []);
+      [-3.4, 9.0], [-4.0, 10.4], [-2.9, 11.6],
+      [3.5, 9.0], [4.1, 10.4], [3.0, 11.6],
+    ] as [number, number][])
+      .map(([u, f], i) => {
+        const [x, z] = spot(u, f);
+        return { x, z, scale: 1.25 + (i % 3) * 0.25 + r() * 0.3, rot: r() * 6.28, tone: Math.floor(r() * 4) };
+      })
+      .filter((t) => !blocked(t.x, t.z, 1.2));
+  }, [blocked]);
 
   /**
    * Деревья внутри самой поляны — в промежутках между станциями и по бокам
@@ -575,7 +595,7 @@ export const Terrain = memo(function Terrain() {
      * всего: это самый крупный план, там каждая травинка видна.
      */
     for (let i = 0; i < 90; i++) {
-      const [x, z] = spot((rand() - 0.5) * 7.4, 6 + rand() * 4.2);
+      const [x, z] = spot((rand() - 0.5) * 7.4, 7.5 + rand() * 5);
       const roll = rand();
       if (roll < 0.44) tuftItems.push({ x, z, scale: 0.9 + rand() * 0.8, seedX: x, seedZ: z });
       else if (roll < 0.62) {
@@ -675,8 +695,9 @@ export const Terrain = memo(function Terrain() {
       [8.6, -1.6, -0.8, 0.88], [-8.8, 1.8, 0.8, 0.9],
       [-9.6, -3.4, 0.6, 0.92], [-8.2, 6.8, 0.9, 0.86],
     ];
+    // домик не должен встать на улицу, на площадку станции или в реку
     return raw
-      .filter(([x, z]) => distanceToRiver(x, z) > 1.6)
+      .filter(([x, z]) => !blocked(x, z, 1.0))
       .map(([x, z, rot, k], i) => ({
         x,
         z,
@@ -687,7 +708,7 @@ export const Terrain = memo(function Terrain() {
         wall: WALLS[i % WALLS.length],
         roof: ROOFS[(i * 3) % ROOFS.length],
       }));
-  }, []);
+  }, [blocked]);
 
   // изгороди и заборы отсеиваются по реке — иначе живая изгородь встаёт
   // поперёк русла и висит зелёной доской над водой
@@ -752,9 +773,18 @@ export const Terrain = memo(function Terrain() {
       {/* Река справа от города */}
       <River />
 
-      {/* Лес: стена вокруг поляны и кулисы переднего плана */}
-      <ConiferField items={forest.conifers.concat(foreground, inTown)} />
-      <TreeField items={forest.trees} />
+      {/*
+        Лес: стена вокруг поляны и кулисы переднего плана. Разделён на ближний
+        и дальний по SHADOW_R. Теневая камера накрывает только окрестности
+        города, поэтому дальние деревья в теневую карту всё равно не попадают —
+        но, пока они помечены castShadow, их геометрия каждый раз гоняется через
+        теневой проход впустую. Это самый дешёвый способ вернуть кадры, а вместе
+        с ними и разрешение отрисовки (см. AdaptiveQuality).
+      */}
+      <ConiferField items={forest.conifers.near.concat(foreground, inTown)} />
+      <ConiferField items={forest.conifers.far} castShadow={false} />
+      <TreeField items={forest.trees.near} />
+      <TreeField items={forest.trees.far} castShadow={false} />
       <BushField items={forest.bushes.concat(decor.bushItems)} />
 
       {/* Кварталы домиков — то, что делает карту городом */}

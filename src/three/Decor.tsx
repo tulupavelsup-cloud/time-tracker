@@ -271,7 +271,7 @@ const TREE_BLOBS: { p: [number, number, number]; s: [number, number, number] }[]
   { p: [-0.1, -0.05, 0.6], s: [0.54, 0.52, 0.54] },
 ];
 
-export function TreeField({ items }: { items: TreeSpec[] }) {
+export function TreeField({ items, castShadow = true }: { items: TreeSpec[]; castShadow?: boolean }) {
   const parts = useMemo(() => {
     const trunks: Placed[] = [];
     const crowns: Placed[] = [];
@@ -294,11 +294,11 @@ export function TreeField({ items }: { items: TreeSpec[] }) {
   }, [items]);
   return (
     <group>
-      <Layer items={parts.trunks} castShadow receiveShadow>
+      <Layer items={parts.trunks} castShadow={castShadow} receiveShadow>
         <cylinderGeometry args={[0.17, 0.25, 1.44, 9]} />
         <meshStandardMaterial roughness={1} flatShading />
       </Layer>
-      <Layer items={parts.crowns} castShadow receiveShadow>
+      <Layer items={parts.crowns} castShadow={castShadow} receiveShadow>
         <icosahedronGeometry args={[0.95, 1]} />
         <meshStandardMaterial roughness={1} flatShading />
       </Layer>
@@ -324,7 +324,7 @@ const CONIFER_TONES: string[][] = [
   ['#2d7238', '#358141', '#3e904a', '#479f53'],
 ];
 
-export function ConiferField({ items }: { items: TreeSpec[] }) {
+export function ConiferField({ items, castShadow = true }: { items: TreeSpec[]; castShadow?: boolean }) {
   const parts = useMemo(() => {
     const trunks: Placed[] = [];
     const cones: Placed[] = [];
@@ -347,11 +347,11 @@ export function ConiferField({ items }: { items: TreeSpec[] }) {
   }, [items]);
   return (
     <group>
-      <Layer items={parts.trunks} castShadow>
+      <Layer items={parts.trunks} castShadow={castShadow}>
         <cylinderGeometry args={[0.1, 0.15, 0.44, 7]} />
         <meshStandardMaterial roughness={1} />
       </Layer>
-      <Layer items={parts.cones} castShadow receiveShadow>
+      <Layer items={parts.cones} castShadow={castShadow} receiveShadow>
         <coneGeometry args={[1, 1, 7]} />
         <meshStandardMaterial roughness={1} flatShading />
       </Layer>

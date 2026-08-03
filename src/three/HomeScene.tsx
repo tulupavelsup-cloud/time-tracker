@@ -72,46 +72,53 @@ const ZONE_3D: Record<
   mine: {
     Model: Mine3D,
     Interior: MineInterior,
-    scale: 0.72,
-    labelY: () => 2.4,
+    scale: 0.85,
+    labelY: () => 2.8,
     portal: [0, 0.58, 0.25],
   },
   bank: {
     Model: Bank3D,
     Interior: BankInterior,
-    scale: 0.8,
-    labelY: () => 2.3,
+    scale: 0.94,
+    labelY: () => 2.7,
     portal: [0, 0.52, 0.3],
   },
   corporation: {
     Model: Corp3D,
     Interior: CorpInterior,
-    scale: 0.66,
-    labelY: (lvl) => 1.5 + lvl * 0.38,
+    scale: 0.78,
+    labelY: (lvl) => 1.75 + lvl * 0.45,
     portal: [0, 0.44, 0.24],
   },
   spaceport: {
     Model: Space3D,
     Interior: SpaceInterior,
-    scale: 0.62,
-    labelY: (lvl) => 1.3 + lvl * 0.28,
+    scale: 0.73,
+    labelY: (lvl) => 1.55 + lvl * 0.33,
     portal: [-0.1, 0.36, 0.32],
   },
   oil: {
     Model: Oil3D,
     Interior: OilInterior,
-    scale: 0.64,
-    labelY: (lvl) => 1.3 + lvl * 0.34,
+    scale: 0.75,
+    labelY: (lvl) => 1.55 + lvl * 0.4,
     portal: [0.05, 0.42, 0.22],
   },
   farm: {
     Model: Farm3D,
     Interior: FarmInterior,
-    scale: 0.74,
-    labelY: () => 2.1,
+    scale: 0.87,
+    labelY: () => 2.5,
     portal: [0.4, 0.5, 0.55],
   },
 };
+
+/**
+ * Половина габарита самой крупной станции на земле: площадка зоны (радиус 1.72
+ * до масштаба) у банка плюс кромка вытоптанной земли. Кадр камеры считается с
+ * этим запасом — иначе край площадки крайней зоны срезало бы бортиком экрана.
+ */
+const STATION_HALF = 1.72 * 0.94 + 0.3;
 
 const DEG = Math.PI / 180;
 /**
@@ -157,9 +164,10 @@ function fitFrame(aspect: number, widthPx: number) {
    * либо резал подпись крайней станции о край экрана (на 430 px), либо зря
    * отодвигал камеру (на широком).
    */
-  const LABEL_HALF_PX = 62;
+  const LABEL_HALF_PX = 58;
   const k = Math.min(0.4, LABEL_HALF_PX / Math.max(120, widthPx / 2));
-  const halfW = CITY_HALF_U / (1 - k);
+  // что шире — подпись крайней станции или сама её площадка
+  const halfW = Math.max(CITY_HALF_U / (1 - k), CITY_HALF_U + STATION_HALF);
   const halfD = CITY_HALF_F + 1.9;
   const tanV = Math.tan((CAM_FOV / 2) * DEG);
   const byWidth = halfW / (tanV * Math.max(0.35, aspect));
@@ -235,8 +243,8 @@ function Station({
   const zone = hasInterior(cat.theme) ? ZONE_3D[cat.theme] : null;
   // у зон с 3D-моделью уровень можно принудить (демо-переключатель)
   const level = zone && levelOverride != null ? levelOverride : getZoneLevel(seconds).level;
-  const scale = zone ? zone.scale : 0.9;
-  const labelY = zone ? zone.labelY(level) : 2.1;
+  const scale = zone ? zone.scale : 1.06;
+  const labelY = zone ? zone.labelY(level) : 2.5;
   return (
     <group position={[pos[0], GRASS_Y, pos[1]]}>
       {/* Вытоптанная земля под станцией: площадка зоны должна стоять на грунте,
@@ -345,21 +353,24 @@ function DiveRig({ active, portal }: { active: boolean; portal: [number, number,
 const FULL_DPR = typeof window === 'undefined' ? 1 : Math.min(window.devicePixelRatio || 1, 2);
 
 /**
- * Качество по факту, а не по догадке. Мягкие тени считаются НА КАЖДЫЙ ПИКСЕЛЬ,
- * поэтому разрешение отрисовки — самый прямой рычаг цены кадра. На мощном
- * телефоне рисуем в полном (картинка не страдает — Тимур просил не экономить
- * на ней), а если устройство не тянет и кадры проседают, разрешение
- * опускается; когда отпустило — возвращается. Постоянно резать качество ради
- * слабых устройств нельзя, а вот отдавать его им по мере надобности — можно.
+ * Качество по факту, а не по догадке — но с ВЫСОКИМ полом.
+ *
+ * Разрешение отрисовки — самый прямой рычаг цены кадра, и раньше на просадке
+ * оно падало до 1: на телефоне с плотным экраном это значит, что кадр рисуется
+ * втрое-вчетверо крупнее пикселя и растягивается — картинка выглядит
+ * замыленной. А ронять её тут особенно нечего ради: карта СТАТИЧНА (созвон №6),
+ * камера и мир не двигаются, и разница между 60 и 35 кадрами на ней не видна
+ * вообще, тогда как мыло видно сразу. Поэтому на просадке отдаём частоту, а не
+ * резкость: ниже 1.5 не опускаемся.
  */
 function AdaptiveQuality() {
   const setDpr = useThree((s) => s.setDpr);
   return (
     <PerformanceMonitor
       onIncline={() => setDpr(FULL_DPR)}
-      onDecline={() => setDpr(Math.max(1, FULL_DPR * 0.7))}
+      onDecline={() => setDpr(Math.min(FULL_DPR, Math.max(1.5, FULL_DPR * 0.85)))}
       flipflops={3}
-      onFallback={() => setDpr(1)}
+      onFallback={() => setDpr(Math.min(FULL_DPR, 1.5))}
     />
   );
 }
@@ -404,7 +415,7 @@ function SceneContents({
   const atStation = activeIndex >= 0;
   const base = atStation ? posOf(activeIndex) : TOWN_CENTER;
   const charSpot: [number, number] = atStation
-    ? [base[0] + 1.35, base[1] + 1.35]
+    ? [base[0] + 1.55, base[1] + 1.55]
     : [base[0] - 1.5, base[1] + 1.55];
   // Ныряем в ТУ станцию, по которой тапнули, и целимся в её вход
   const diveIndex = insideId ? placed.findIndex((c) => c.id === insideId) : -1;
@@ -493,8 +504,10 @@ function SceneContents({
         </group>
       ))}
 
+      {/* Персонаж ростом с треть постройки, как на референсе. Раньше он был
+          вровень с колоннами банка и читался великаном посреди деревни. */}
       <group position={[charSpot[0], GRASS_Y, charSpot[1]]} rotation={[0, atStation ? -0.6 : 0.5, 0]}>
-        <Character3D working={atStation} scale={0.85} />
+        <Character3D working={atStation} scale={0.58} />
       </group>
 
       <FitCamera enabled={view === 'map'} />
@@ -538,7 +551,14 @@ export function HomeScene(props: HomeSceneProps) {
        * и подтягивает тени — из-за него трава уходила в блёкло-серый, а тень
        * почти пропадала. Референс же плакатно-цветной, с чистой зеленью.
        */
-      gl={{ antialias: true, toneMapping: THREE.LinearToneMapping, toneMappingExposure: 1.05 }}
+      gl={{
+        // На плотном экране сглаживание не нужно: там пиксель и так меньше, чем
+        // ступенька, зато MSAA стоит заметную долю кадра — а именно из-за неё
+        // разрешение и приходилось ронять. Сглаживаем только там, где dpr = 1.
+        antialias: FULL_DPR < 1.75,
+        toneMapping: THREE.LinearToneMapping,
+        toneMappingExposure: 1.05,
+      }}
       // карта не двигается — жесты по холсту не перехватываем, страница живёт как обычно
       style={{ touchAction: 'manipulation' }}
     >
