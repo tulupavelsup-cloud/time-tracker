@@ -12,8 +12,7 @@
  * тайм-трекера — пусть он и будет часами.
  */
 
-import { useMemo, useRef } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useEffect, useMemo, useState } from 'react';
 import * as THREE from 'three';
 
 const STONE = '#ece5d3';
@@ -92,23 +91,15 @@ function Gable({
   );
 }
 
-/** Флаг на флагштоке — полотнище чуть колышется. */
+/** Флаг на флагштоке. */
 function Flag({ position, color = '#e8564a', s = 1 }: { position: [number, number, number]; color?: string; s?: number }) {
-  const cloth = useRef<THREE.Mesh>(null);
-  useFrame((state) => {
-    if (cloth.current) {
-      const t = state.clock.elapsedTime;
-      cloth.current.rotation.y = Math.sin(t * 1.6 + position[0]) * 0.18;
-      cloth.current.scale.x = 1 + Math.sin(t * 2.4 + position[2]) * 0.07;
-    }
-  });
   return (
     <group position={position} scale={s}>
       <mesh castShadow position={[0, 0.3, 0]}>
         <cylinderGeometry args={[0.022, 0.026, 0.6, 6]} />
         <meshStandardMaterial color="#6f5a44" roughness={0.9} />
       </mesh>
-      <mesh ref={cloth} castShadow position={[0.16, 0.48, 0]}>
+      <mesh castShadow position={[0.16, 0.48, 0]} rotation={[0, 0.16, 0]}>
         <boxGeometry args={[0.3, 0.19, 0.015]} />
         <meshStandardMaterial color={color} roughness={0.8} side={THREE.DoubleSide} />
       </mesh>
@@ -123,17 +114,19 @@ function Flag({ position, color = '#e8564a', s = 1 }: { position: [number, numbe
 /**
  * Циферблат с настоящими стрелками. Часы — сердце тайм-трекера, поэтому время
  * на башне идёт по-настоящему, а не нарисовано.
+ *
+ * Стрелки переставляются раз в полминуты, а не каждый кадр: минутная за кадр
+ * проходит четыре тысячных градуса — разницы не видно, а покадровый пересчёт
+ * стоит ровно столько же, сколько любая другая анимация.
  */
 function ClockFace({ position, r = 0.3, gold = false }: { position: [number, number, number]; r?: number; gold?: boolean }) {
-  const hour = useRef<THREE.Group>(null);
-  const minute = useRef<THREE.Group>(null);
-  useFrame(() => {
-    const now = new Date();
-    const m = now.getMinutes() + now.getSeconds() / 60;
-    const h = (now.getHours() % 12) + m / 60;
-    if (minute.current) minute.current.rotation.z = -(m / 60) * Math.PI * 2;
-    if (hour.current) hour.current.rotation.z = -(h / 12) * Math.PI * 2;
-  });
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  const minutes = now.getMinutes() + now.getSeconds() / 60;
+  const hours = (now.getHours() % 12) + minutes / 60;
   const ticks = useMemo(() => Array.from({ length: 12 }, (_, i) => (i / 12) * Math.PI * 2), []);
   return (
     <group position={position}>
@@ -151,13 +144,13 @@ function ClockFace({ position, r = 0.3, gold = false }: { position: [number, num
           <meshStandardMaterial color="#3b3229" />
         </mesh>
       ))}
-      <group ref={hour} position={[0, 0, 0.08]}>
+      <group position={[0, 0, 0.08]} rotation={[0, 0, -(hours / 12) * Math.PI * 2]}>
         <mesh position={[0, r * 0.26, 0]}>
           <boxGeometry args={[0.032, r * 0.52, 0.014]} />
           <meshStandardMaterial color="#2f2721" />
         </mesh>
       </group>
-      <group ref={minute} position={[0, 0, 0.09]}>
+      <group position={[0, 0, 0.09]} rotation={[0, 0, -(minutes / 60) * Math.PI * 2]}>
         <mesh position={[0, r * 0.38, 0]}>
           <boxGeometry args={[0.022, r * 0.76, 0.014]} />
           <meshStandardMaterial color="#2f2721" />

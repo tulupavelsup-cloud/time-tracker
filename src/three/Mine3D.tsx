@@ -5,13 +5,18 @@
  * копёр с колесом и водяное колесо, растущие светящиеся кристаллы.
  * Растёт по уровням (thresholds.ts): 0 пустырь → 1 лагерь(рельсы+палатка) →
  * 2 вход в скалу → 3 огонь+кристаллы+вагонетки → 4 табличка+ответвления рельсов →
- * 5 факелы+копёр → 6 водяное колесо+флаг+золото. active — огонь ярче, вагонетки
- * едут, колёса крутятся.
+ * 5 факелы+копёр → 6 водяное колесо+флаг+золото.
+ *
+ * Движется на станции ровно ОДНА вещь — вагонетки по кольцу (быстрее, когда
+ * идёт работа). Остальное стоит: покадровая мелочь вроде дрожащего пламени и
+ * пульсирующих кристаллов на общем плане не читалась, а стоила и кадров, и
+ * склейки — живое ведь не склеишь (см. Baked.tsx).
  */
 
 import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { LIVE } from './Baked';
 
 /* ───────────────────────── примитивы ───────────────────────── */
 
@@ -67,15 +72,10 @@ export function Crystal({
   rot?: [number, number, number];
   gold?: boolean;
 }) {
-  const ref = useRef<THREE.MeshStandardMaterial>(null);
-  useFrame((s) => {
-    if (ref.current) ref.current.emissiveIntensity = 0.6 + Math.sin(s.clock.elapsedTime * 2 + position[0] * 3 + position[2]) * 0.35;
-  });
   return (
     <mesh castShadow position={position} rotation={rot}>
       <coneGeometry args={[r, h, 5]} />
       <meshStandardMaterial
-        ref={ref}
         color={gold ? '#f6cf6a' : '#dbf7fb'}
         emissive={gold ? '#e0a52e' : '#5fdcea'}
         emissiveIntensity={0.7}
@@ -98,15 +98,8 @@ export function CrystalSpike({ position, s = 1, gold = false }: { position: [num
   );
 }
 
-/** Огонь: языки пламени + тёплый свет (мерцает). */
+/** Огонь: языки пламени + тёплый свет. */
 function Fire({ position, scale = 1, active = false }: { position: [number, number, number]; scale?: number; active?: boolean }) {
-  const flame = useRef<THREE.Mesh>(null);
-  const light = useRef<THREE.PointLight>(null);
-  useFrame((s) => {
-    const t = s.clock.elapsedTime;
-    if (flame.current) flame.current.scale.y = 1 + Math.sin(t * 12) * 0.2;
-    if (light.current) light.current.intensity = (active ? 2 : 1.5) + Math.sin(t * 10) * 0.4;
-  });
   return (
     <group position={position} scale={scale}>
       <mesh position={[0, 0.03, 0]} rotation={[0, 0.4, 0.5]}>
@@ -117,7 +110,7 @@ function Fire({ position, scale = 1, active = false }: { position: [number, numb
         <cylinderGeometry args={[0.025, 0.025, 0.34, 6]} />
         <meshStandardMaterial color="#4a3020" roughness={0.9} />
       </mesh>
-      <mesh ref={flame} position={[0, 0.2, 0]}>
+      <mesh position={[0, 0.2, 0]}>
         <coneGeometry args={[0.13, 0.4, 8]} />
         <meshStandardMaterial color="#ffcf6a" emissive="#ff7a1a" emissiveIntensity={2} roughness={0.4} />
       </mesh>
@@ -125,17 +118,13 @@ function Fire({ position, scale = 1, active = false }: { position: [number, numb
         <coneGeometry args={[0.07, 0.26, 8]} />
         <meshStandardMaterial color="#ffe9a0" emissive="#ffc24a" emissiveIntensity={2.4} roughness={0.4} />
       </mesh>
-      <pointLight ref={light} position={[0, 0.3, 0]} color="#ff9a3a" intensity={1.6} distance={3} decay={2} />
+      <pointLight position={[0, 0.3, 0]} color="#ff9a3a" intensity={active ? 2 : 1.6} distance={3} decay={2} />
     </group>
   );
 }
 
 /** Настенный факел. */
 export function WallTorch({ position }: { position: [number, number, number] }) {
-  const f = useRef<THREE.Mesh>(null);
-  useFrame((s) => {
-    if (f.current) f.current.scale.y = 1 + Math.sin(s.clock.elapsedTime * 14 + position[0]) * 0.25;
-  });
   return (
     <group position={position}>
       <mesh castShadow position={[0, 0.24, 0]}>
@@ -146,7 +135,7 @@ export function WallTorch({ position }: { position: [number, number, number] }) 
         <sphereGeometry args={[0.05, 8, 8]} />
         <meshStandardMaterial color="#3a2f1e" roughness={0.8} />
       </mesh>
-      <mesh ref={f} position={[0, 0.58, 0]}>
+      <mesh position={[0, 0.58, 0]}>
         <coneGeometry args={[0.06, 0.2, 7]} />
         <meshStandardMaterial color="#ffd27a" emissive="#ff8a2a" emissiveIntensity={2.2} roughness={0.4} />
       </mesh>
@@ -297,19 +286,15 @@ export function Barrel({ position, rot = 0 }: { position: [number, number, numbe
   );
 }
 
-/** Копёр: А-рама с вращающимся колесом. */
-function Headframe({ position, active }: { position: [number, number, number]; active: boolean }) {
-  const wheel = useRef<THREE.Mesh>(null);
-  useFrame((_, dt) => {
-    if (wheel.current && active) wheel.current.rotation.z += dt * 1.1;
-  });
+/** Копёр: А-рама с колесом. */
+function Headframe({ position }: { position: [number, number, number] }) {
   return (
     <group position={position}>
       <Timber position={[-0.32, 0.7, 0]} args={[0.09, 1.5, 0.09]} rot={[0, 0, 0.2]} />
       <Timber position={[0.32, 0.7, 0]} args={[0.09, 1.5, 0.09]} rot={[0, 0, -0.2]} />
       <Timber position={[0, 1.4, 0]} args={[0.75, 0.09, 0.09]} />
       <Timber position={[0, 0.7, 0.24]} args={[0.07, 1.4, 0.07]} rot={[0.2, 0, 0]} />
-      <mesh ref={wheel} position={[0, 1.44, 0]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh position={[0, 1.44, 0]} rotation={[Math.PI / 2, 0, 0]}>
         <torusGeometry args={[0.24, 0.038, 10, 22]} />
         <meshStandardMaterial color="#4a4d55" metalness={0.6} roughness={0.4} />
       </mesh>
@@ -324,15 +309,11 @@ function Headframe({ position, active }: { position: [number, number, number]; a
 }
 
 /** Водяное колесо. */
-function WaterWheel({ position, active }: { position: [number, number, number]; active: boolean }) {
-  const wheel = useRef<THREE.Group>(null);
+function WaterWheel({ position }: { position: [number, number, number] }) {
   const paddles = useMemo(() => Array.from({ length: 8 }, (_, i) => (i / 8) * Math.PI * 2), []);
-  useFrame((_, dt) => {
-    if (wheel.current) wheel.current.rotation.x += dt * (active ? 0.9 : 0.3);
-  });
   return (
     <group position={position} rotation={[0, Math.PI / 2, 0]}>
-      <group ref={wheel}>
+      <group>
         {[-0.09, 0.09].map((z) => (
           <mesh key={z} position={[0, 0, z]} rotation={[Math.PI / 2, 0, 0]}>
             <torusGeometry args={[0.4, 0.035, 8, 20]} />
@@ -449,7 +430,7 @@ export function Mine3D({ level, active = false }: { level: number; active?: bool
       {level >= 1 && (
         <group position={[0, 0.3, 0]}>
           <RailLoop radius={1.15} />
-          <group ref={carts}>
+          <group ref={carts} userData={LIVE}>
             {CART_ANGLES.slice(0, nCarts).map((a) => (
               <group key={a} position={[Math.cos(a) * 1.15, 0.17, Math.sin(a) * 1.15]} rotation={[0, -a, 0]}>
                 <Cart ore={cartsOre} />
@@ -533,12 +514,12 @@ export function Mine3D({ level, active = false }: { level: number; active?: bool
       )}
 
       {/* Уровень ≥5 — копёр */}
-      {level >= 5 && <Headframe position={[1.0, 0.3, -0.6]} active={active} />}
+      {level >= 5 && <Headframe position={[1.0, 0.3, -0.6]} />}
 
       {/* Уровень ≥6 — водяное колесо + флаг */}
       {level >= 6 && (
         <group position={[0, 0.3, 0]}>
-          <WaterWheel position={[-1.25, 0.4, -0.35]} active={active} />
+          <WaterWheel position={[-1.25, 0.4, -0.35]} />
           <mesh position={[0, 2.35, -0.55]}>
             <cylinderGeometry args={[0.03, 0.03, 0.8, 6]} />
             <meshStandardMaterial color="#6b4a2c" />

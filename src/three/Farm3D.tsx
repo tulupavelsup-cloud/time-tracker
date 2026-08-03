@@ -8,12 +8,15 @@
  * водой, куры → 3 амбар с двускатной крышей и силосной башней → 4 мельница с
  * вращающимися крыльями, тачка, поле подсолнухов → 5 теплица со светом, второй
  * силос, забор, трактор → 6 золотая жатва: колосья, флаг, полные ящики урожая.
- * active — крылья мельницы крутятся быстрее, в теплице горит свет, куры ходят.
+ *
+ * Движутся на ферме ровно КРЫЛЬЯ МЕЛЬНИЦЫ (быстрее, когда идёт работа) —
+ * остальное стоит, чтобы станцию можно было спечь в один кусок (см. Baked.tsx).
  */
 
 import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { LIVE } from './Baked';
 import { chain, Layer, type Placed } from './Instanced';
 
 /* ───────────────────────── палитра ───────────────────────── */
@@ -93,10 +96,6 @@ function Bed({
 
 /** Пугало: крестовина, мешковина, шляпа. */
 function Scarecrow({ position, rot = 0 }: { position: [number, number, number]; rot?: number }) {
-  const head = useRef<THREE.Group>(null);
-  useFrame((s) => {
-    if (head.current) head.current.rotation.z = Math.sin(s.clock.elapsedTime * 0.9) * 0.09;
-  });
   return (
     <group position={position} rotation={[0, rot, 0]}>
       <mesh castShadow position={[0, 0.42, 0]}>
@@ -107,7 +106,7 @@ function Scarecrow({ position, rot = 0 }: { position: [number, number, number]; 
         <boxGeometry args={[0.66, 0.05, 0.05]} />
         <meshStandardMaterial color={WOOD_D} roughness={0.95} />
       </mesh>
-      <group ref={head}>
+      <group>
         <mesh castShadow position={[0, 0.6, 0]}>
           <boxGeometry args={[0.28, 0.34, 0.2]} />
           <meshStandardMaterial color="#c9a86a" roughness={1} />
@@ -135,17 +134,13 @@ function Scarecrow({ position, rot = 0 }: { position: [number, number, number]; 
   );
 }
 
-/** Курица: тельце, гребешок, клюв. Ходит по кругу, когда идёт работа. */
-function Hen({ radius, phase, active }: { radius: number; phase: number; active: boolean }) {
-  const g = useRef<THREE.Group>(null);
-  useFrame((s) => {
-    if (!g.current) return;
-    const t = s.clock.elapsedTime * (active ? 0.55 : 0.16) + phase;
-    g.current.position.set(Math.cos(t) * radius, 0.09 + Math.abs(Math.sin(t * 6)) * 0.02, Math.sin(t) * radius);
-    g.current.rotation.y = -t + Math.PI / 2;
-  });
+/** Курица: тельце, гребешок, клюв. Стоит во дворе — по кругу ходят крылья мельницы. */
+function Hen({ radius, phase }: { radius: number; phase: number }) {
   return (
-    <group ref={g}>
+    <group
+      position={[Math.cos(phase) * radius, 0.1, Math.sin(phase) * radius]}
+      rotation={[0, -phase + Math.PI / 2, 0]}
+    >
       <mesh castShadow scale={[1, 0.9, 1.25]}>
         <sphereGeometry args={[0.1, 12, 10]} />
         <meshStandardMaterial color="#f4efe3" roughness={0.9} />
@@ -253,7 +248,7 @@ function Mill({ position, active }: { position: [number, number, number]; active
         <meshStandardMaterial color={BARN} roughness={0.85} flatShading />
       </mesh>
       {/* крылья */}
-      <group ref={blades} position={[0, 1.16, 0.42]}>
+      <group ref={blades} userData={LIVE} position={[0, 1.16, 0.42]}>
         {[0, 1, 2, 3].map((i) => (
           <group key={i} rotation={[0, 0, (i / 4) * Math.PI * 2]}>
             <mesh castShadow position={[0, 0.42, 0]}>
@@ -595,9 +590,9 @@ export function Farm3D({ level, active = false }: { level: number; active?: bool
       )}
       {s >= 2 && (
         <group position={[0, 0.25, 0]}>
-          <Hen radius={1.18} phase={0.4} active={active} />
-          {s >= 3 && <Hen radius={1.05} phase={2.6} active={active} />}
-          {s >= 5 && <Hen radius={1.3} phase={4.4} active={active} />}
+          <Hen radius={1.18} phase={0.4} />
+          {s >= 3 && <Hen radius={1.05} phase={2.6} />}
+          {s >= 5 && <Hen radius={1.3} phase={4.4} />}
           {/* бочка с водой */}
           <group position={[-1.45, 0, 0.25]}>
             <mesh castShadow receiveShadow position={[0, 0.19, 0]}>

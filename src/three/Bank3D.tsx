@@ -6,13 +6,18 @@
  * входом, слитки → 4 портик с колоннами и фронтоном, вывеска «БАНК», инкассатор,
  * охранник → 5 пристройка-хранилище с большой дверью-сейфом, свет в окнах,
  * фонари, самоцветы → 6 золотой купол с флагом, золотая отделка, груда слитков,
- * бронемашина, сияющие самоцветы. active — колесо сейфа крутится, окна и
- * самоцветы горят ярче, в портике горит тёплый свет.
+ * бронемашина, сияющие самоцветы.
+ *
+ * Движется у банка ровно ШТУРВАЛ ДВЕРИ-СЕЙФА (быстрее, когда идёт работа).
+ * Окна, самоцветы и маячок инкассатора просто горят ярче при работе, но не
+ * мерцают: пульсация на общем плане не читалась, зато мешала спечь станцию в
+ * один кусок (см. Baked.tsx).
  */
 
 import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { LIVE } from './Baked';
 import { LampPost } from './Decor';
 
 /* ───────────────────────── палитра ───────────────────────── */
@@ -90,13 +95,6 @@ function Gem({
   s?: number;
   active?: boolean;
 }) {
-  const mat = useRef<THREE.MeshStandardMaterial>(null);
-  useFrame((state) => {
-    if (mat.current) {
-      const t = state.clock.elapsedTime * (active ? 2.4 : 1.2) + position[0] * 3 + position[2];
-      mat.current.emissiveIntensity = (active ? 0.85 : 0.5) + Math.sin(t) * 0.3;
-    }
-  });
   return (
     <group position={position} scale={s}>
       {/* каменная тумба — самоцвет выставлен напоказ, а не валяется на земле */}
@@ -106,7 +104,7 @@ function Gem({
       </mesh>
       <mesh castShadow position={[0, 0.28, 0]} scale={[1, 1.5, 1]}>
         <octahedronGeometry args={[0.12, 0]} />
-        <meshStandardMaterial ref={mat} color={color} emissive={color} emissiveIntensity={0.6} roughness={0.15} metalness={0.15} flatShading />
+        <meshStandardMaterial color={color} emissive={color} emissiveIntensity={active ? 0.85 : 0.6} roughness={0.15} metalness={0.15} flatShading />
       </mesh>
       <mesh castShadow position={[0.12, 0.16, 0.05]} scale={[0.6, 0.9, 0.6]} rotation={[0, 0.6, 0.3]}>
         <octahedronGeometry args={[0.12, 0]} />
@@ -208,10 +206,6 @@ function Barrow({ position, rot = 0 }: { position: [number, number, number]; rot
 
 /** Инкассаторская машина. */
 export function Van({ position, rot = 0, big = false, active = false }: { position: [number, number, number]; rot?: number; big?: boolean; active?: boolean }) {
-  const beacon = useRef<THREE.MeshStandardMaterial>(null);
-  useFrame((state) => {
-    if (beacon.current) beacon.current.emissiveIntensity = active ? 0.9 + Math.sin(state.clock.elapsedTime * 6) * 0.7 : 0.4;
-  });
   const s = big ? 1.18 : 1;
   const body = big ? '#dfe4ea' : '#e6eaee';
   return (
@@ -259,7 +253,7 @@ export function Van({ position, rot = 0, big = false, active = false }: { positi
       {/* мигалка */}
       <mesh position={[0, 0.43, 0.3]}>
         <boxGeometry args={[0.11, 0.05, 0.08]} />
-        <meshStandardMaterial ref={beacon} color="#7fd4ff" emissive="#3ba7ff" emissiveIntensity={0.4} roughness={0.3} />
+        <meshStandardMaterial color="#7fd4ff" emissive="#3ba7ff" emissiveIntensity={active ? 0.9 : 0.4} roughness={0.3} />
       </mesh>
       {/* колёса с диском */}
       {[
@@ -410,12 +404,6 @@ function Window({
   lit?: boolean;
   active?: boolean;
 }) {
-  const mat = useRef<THREE.MeshStandardMaterial>(null);
-  useFrame((state) => {
-    if (mat.current && lit) {
-      mat.current.emissiveIntensity = (active ? 1.1 : 0.7) + Math.sin(state.clock.elapsedTime * 1.4 + position[0] * 5) * 0.08;
-    }
-  });
   return (
     <group position={position} rotation={[0, rotY, 0]}>
       <mesh position={[0, 0, -0.012]}>
@@ -425,10 +413,9 @@ function Window({
       <mesh position={[0, 0, 0.006]}>
         <boxGeometry args={[w, h, 0.02]} />
         <meshStandardMaterial
-          ref={mat}
           color={lit ? '#ffd489' : GLASS}
           emissive={lit ? '#ffb45e' : '#0d2233'}
-          emissiveIntensity={lit ? 0.8 : 0.08}
+          emissiveIntensity={lit ? (active ? 1.1 : 0.8) : 0.08}
           roughness={0.25}
           metalness={0.35}
         />
@@ -533,7 +520,7 @@ export function VaultDoor({ position, r = 0.22, active = false }: { position: [n
         <meshStandardMaterial color={METAL} metalness={0.6} roughness={0.4} />
       </mesh>
       {/* штурвал */}
-      <group ref={wheel} position={[0, 0, 0.06]}>
+      <group ref={wheel} userData={LIVE} position={[0, 0, 0.06]}>
         <mesh castShadow>
           <torusGeometry args={[r * 0.55, r * 0.075, 8, 20]} />
           <meshStandardMaterial color={GOLD_D} metalness={0.7} roughness={0.35} />
@@ -564,11 +551,7 @@ export function VaultDoor({ position, r = 0.22, active = false }: { position: [n
 }
 
 /** Золотой купол с флажком. */
-function Dome({ position, r = 0.34, active = false }: { position: [number, number, number]; r?: number; active?: boolean }) {
-  const flag = useRef<THREE.Mesh>(null);
-  useFrame((state) => {
-    if (flag.current) flag.current.rotation.y = Math.sin(state.clock.elapsedTime * (active ? 2 : 1)) * 0.25;
-  });
+function Dome({ position, r = 0.34 }: { position: [number, number, number]; r?: number }) {
   return (
     <group position={position}>
       {/* барабан */}
@@ -590,7 +573,7 @@ function Dome({ position, r = 0.34, active = false }: { position: [number, numbe
         <sphereGeometry args={[0.045, 12, 10]} />
         <meshStandardMaterial color={GOLD_L} emissive={GOLD_D} emissiveIntensity={0.4} metalness={0.6} roughness={0.3} />
       </mesh>
-      <mesh ref={flag} position={[0.11, r * 0.92 + 0.3, 0]}>
+      <mesh position={[0.11, r * 0.92 + 0.3, 0]} rotation={[0, 0.2, 0]}>
         <boxGeometry args={[0.2, 0.13, 0.012]} />
         <meshStandardMaterial color="#e2705f" roughness={0.8} />
       </mesh>
@@ -871,7 +854,7 @@ export function Bank3D({ level, active = false }: { level: number; active?: bool
             )}
 
             {/* ── Уровень 6: золотой купол с флагом ── */}
-            {level >= 6 && <Dome position={[0, 0.09 + topY + 0.19, cz - 0.06]} r={0.34} active={active} />}
+            {level >= 6 && <Dome position={[0, 0.09 + topY + 0.19, cz - 0.06]} r={0.34} />}
           </group>
         )}
 

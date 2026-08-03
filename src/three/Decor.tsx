@@ -1,7 +1,7 @@
 /**
  * Мелкий детализирующий декор мира (3D) в мягком «игрушечном» стиле референсов:
  * цветы с лепестками, грибы, кустики-травинки, фонари, заборчики, лавочки,
- * камешки, хвойные ёлки, кувшинки и парящие пылинки. Всё расставляется
+ * камешки, хвойные ёлки и кувшинки. Всё расставляется
  * детерминированно (сид), чтобы позиции не прыгали между кадрами. Смысл — чтобы
  * при приближении камеры было что рассматривать.
  *
@@ -10,8 +10,7 @@
  * Геометрия, цвета и раскладка ровно те же, что были поштучно (см. Instanced.tsx).
  */
 
-import { useMemo, useRef } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useMemo } from 'react';
 import * as THREE from 'three';
 import { chain, Layer, type Placed } from './Instanced';
 
@@ -679,46 +678,5 @@ export function LilyPad({ position }: { position: [number, number, number] }) {
         <meshStandardMaterial color="#f4b8d0" roughness={0.6} />
       </mesh>
     </group>
-  );
-}
-
-/* ─────────────────────────── Пылинки/светлячки ─────────────────────────── */
-
-/** Мягко парящие светящиеся частицы (пыльца на солнце) — одним слоем инстансов. */
-export function Motes({ count = 16, area = 22, seed = 7 }: { count?: number; area?: number; seed?: number }) {
-  const ref = useRef<THREE.InstancedMesh>(null);
-  const specs = useMemo(() => {
-    const r = rng(seed);
-    return Array.from({ length: count }, () => ({
-      x: (r() - 0.5) * area,
-      y: 0.8 + r() * 3.2,
-      z: (r() - 0.5) * area,
-      s: 0.02 + r() * 0.03,
-      phase: r() * Math.PI * 2,
-      speed: 0.3 + r() * 0.5,
-    }));
-  }, [count, area, seed]);
-  const dummy = useMemo(() => new THREE.Object3D(), []);
-  useFrame((s) => {
-    const mesh = ref.current;
-    if (!mesh) return;
-    const t = s.clock.elapsedTime;
-    specs.forEach((sp, i) => {
-      dummy.position.set(
-        sp.x + Math.cos(t * sp.speed * 0.6 + sp.phase) * 0.3,
-        sp.y + Math.sin(t * sp.speed + sp.phase) * 0.35,
-        sp.z,
-      );
-      dummy.scale.setScalar(sp.s);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
-    });
-    mesh.instanceMatrix.needsUpdate = true;
-  });
-  return (
-    <instancedMesh ref={ref} args={[undefined, undefined, specs.length]} frustumCulled={false}>
-      <sphereGeometry args={[1, 8, 8]} />
-      <meshBasicMaterial color="#fff6d8" transparent opacity={0.7} />
-    </instancedMesh>
   );
 }

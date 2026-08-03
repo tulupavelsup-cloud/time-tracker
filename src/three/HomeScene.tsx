@@ -13,13 +13,28 @@
  * Тап по станции с интерьером проваливает внутрь: камера ныряет в портал зоны и
  * сцена сменяется на её интерьер в том же Canvas. Интерфейс приложения плавает
  * стеклом поверх (см. Map.tsx).
+ *
+ * Цена кадра. Станции, ратуша и пустыри СПЕКАЮТСЯ: их неподвижные детали
+ * склеиваются в несколько кусков вместо сотни отдельных (см. Baked.tsx). На
+ * каждой станции при этом движется ровно одна вещь — вагонетки, крылья
+ * мельницы, качалка и так далее; остальное на запуск таймера отзывается
+ * неподвижно. Вместе это 365 поручений видеочипу за кадр вместо 1716.
+ *
+ * Плавность. Пока идёт таймер, экран карты пересчитывает время раз в секунду —
+ * и каждый такой тик прогонял бы через React всю сцену целиком (замерено: 14–22
+ * мс на карте, 8–10 мс внутри зоны, на телефоне кратно больше). Именно от этого
+ * движение шло рывками. Поэтому все тяжёлые куски собираются ОДИН РАЗ и дальше
+ * переиспользуются как есть: мир, ратуша, станции, персонаж и весь интерьер
+ * держатся в useMemo и пересобираются только при смене уровня или состояния
+ * таймера. Тик обновляет одни подписи с временем.
  */
 
-import { Suspense, useEffect, useMemo, useRef } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Environment, Html, Lightformer, PerformanceMonitor } from '@react-three/drei';
 import * as THREE from 'three';
 import type { Category } from '../api';
+import { Baked } from './Baked';
 import { formatDuration } from '../lib/format';
 import { categoryColor } from '../lib/palette';
 import { getTownLevel, getZoneLevel, hasInterior, type InteriorTheme } from '../lib/thresholds';
@@ -245,36 +260,59 @@ function Station({
   const level = zone && levelOverride != null ? levelOverride : getZoneLevel(seconds).level;
   const scale = zone ? zone.scale : 1.06;
   const labelY = zone ? zone.labelY(level) : 2.5;
+  /**
+   * Сама станция собирается ОДИН РАЗ и потом переиспользуется как есть.
+   *
+   * Пока идёт таймер, экран пересчитывает время раз в секунду, и без этого
+   * каждый такой тик заново прогонял всё дерево станции через React — сотни
+   * элементов на каждую из шести. Раз в секунду это давало заметный рывок:
+   * анимация замирала на кадр-другой и шла дальше. Здесь же элемент остаётся
+   * тем же самым объектом, пока не сменится уровень или состояние таймера, и
+   * React пропускает всю ветку целиком.
+   */
+  const model = useMemo(
+    () => (
+      <>
+        {/* Вытоптанная земля под станцией: площадка зоны должна стоять на грунте,
+            а не быть блюдцем, воткнутым в газон (как на референсе). Радиус —
+            по самой площадке зоны (у всех она радиусом 1.72 до масштаба) плюс
+            узкая кромка: широкий песчаный ореол превращал поляну в пустыню. */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, GRASS_Y + 0.01, 0]} receiveShadow>
+          <circleGeometry args={[1.72 * scale + 0.24, 36]} />
+          <meshStandardMaterial color={SAND} roughness={1} />
+        </mesh>
+        <group
+          scale={scale}
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen(cat.id);
+          }}
+          onPointerOver={(e) => {
+            e.stopPropagation();
+            document.body.style.cursor = 'pointer';
+          }}
+          onPointerOut={() => {
+            document.body.style.cursor = 'auto';
+          }}
+        >
+          {/* Станция спекается в несколько мешей: сотня отдельных деталек ехала к
+              видеочипу поштучно (см. Baked.tsx). Пересобирается только при смене
+              уровня или запуске таймера — на карте это раз в несколько часов. */}
+          <Baked deps={[cat.theme, level, active]}>
+            {zone ? <zone.Model level={level} active={active} /> : <StationSign color={categoryColor(cat.color)} />}
+          </Baked>
+          <mesh position={[0, 1, 0]} visible={false}>
+            <cylinderGeometry args={[2, 2, 2.6, 12]} />
+            <meshBasicMaterial />
+          </mesh>
+        </group>
+      </>
+    ),
+    [zone, cat.id, cat.theme, cat.color, level, active, scale, onOpen],
+  );
   return (
     <group position={[pos[0], GRASS_Y, pos[1]]}>
-      {/* Вытоптанная земля под станцией: площадка зоны должна стоять на грунте,
-          а не быть блюдцем, воткнутым в газон (как на референсе). Радиус —
-          по самой площадке зоны (у всех она радиусом 1.72 до масштаба) плюс
-          узкая кромка: широкий песчаный ореол превращал поляну в пустыню. */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, GRASS_Y + 0.01, 0]} receiveShadow>
-        <circleGeometry args={[1.72 * scale + 0.24, 36]} />
-        <meshStandardMaterial color={SAND} roughness={1} />
-      </mesh>
-      <group
-        scale={scale}
-        onClick={(e) => {
-          e.stopPropagation();
-          onOpen(cat.id);
-        }}
-        onPointerOver={(e) => {
-          e.stopPropagation();
-          document.body.style.cursor = 'pointer';
-        }}
-        onPointerOut={() => {
-          document.body.style.cursor = 'auto';
-        }}
-      >
-        {zone ? <zone.Model level={level} active={active} /> : <StationSign color={categoryColor(cat.color)} />}
-        <mesh position={[0, 1, 0]} visible={false}>
-          <cylinderGeometry args={[2, 2, 2.6, 12]} />
-          <meshBasicMaterial />
-        </mesh>
-      </group>
+      {model}
       {/* Подпись — постоянного размера (без distanceFactor): камера стоит
           далеко, и масштабируемая подпись становится нечитаемой — а по ней как
           раз и выбирают станцию. */}
@@ -414,14 +452,66 @@ function SceneContents({
   // фонтана (фонтан стоит справа-спереди от ратуши, и иначе герой был бы в воде).
   const atStation = activeIndex >= 0;
   const base = atStation ? posOf(activeIndex) : TOWN_CENTER;
-  const charSpot: [number, number] = atStation
-    ? [base[0] + 1.55, base[1] + 1.55]
-    : [base[0] - 1.5, base[1] + 1.55];
+  const charX = atStation ? base[0] + 1.55 : base[0] - 1.5;
+  const charZ = base[1] + 1.55;
   // Ныряем в ТУ станцию, по которой тапнули, и целимся в её вход
   const diveIndex = insideId ? placed.findIndex((c) => c.id === insideId) : -1;
   const diveSpot = diveIndex >= 0 ? posOf(diveIndex) : TOWN_CENTER;
   const [px, py, pz] = ZONE_3D[insideTheme].portal;
   const portal: [number, number, number] = [diveSpot[0] + px, GRASS_Y + py, diveSpot[1] + pz];
+
+  /**
+   * Обработчик тапа по станции живёт в экране карты и пересоздаётся при каждом
+   * тике таймера. Через ссылку он становится ПОСТОЯННЫМ, и станции больше не
+   * пересобираются раз в секунду только из-за смены функции.
+   */
+  const openRef = useRef(onOpen);
+  useEffect(() => {
+    openRef.current = onOpen;
+  });
+  const open = useCallback((id: string) => openRef.current(id), []);
+
+  // Неизменные части мира: собираются один раз и дальше React их не трогает
+  const world = useMemo(
+    () => (
+      <>
+        <Terrain />
+        <CityPavement />
+      </>
+    ),
+    [],
+  );
+  const hallLevel = levelOverride ?? townLevel;
+  const hallActive = activeIndex >= 0;
+  const hall = useMemo(
+    () => (
+      <group position={[TOWN_CENTER[0], GRASS_Y, TOWN_CENTER[1]]} scale={0.92}>
+        <Baked deps={[hallLevel, hallActive]}>
+          <TownHall level={hallLevel} active={hallActive} />
+        </Baked>
+      </group>
+    ),
+    [hallLevel, hallActive],
+  );
+  const lots = useMemo(
+    () =>
+      freeSlots.map(([x, z], i) => (
+        <group key={`lot-${i}`} position={[x, GRASS_Y, z]} scale={0.8}>
+          <Baked>
+            <VacantLot />
+          </Baked>
+        </group>
+      )),
+    [freeSlots],
+  );
+  const hero = useMemo(
+    () => (
+      <group position={[charX, GRASS_Y, charZ]} rotation={[0, atStation ? -0.6 : 0.5, 0]}>
+        <Character3D working={atStation} scale={0.58} />
+      </group>
+    ),
+    [charX, charZ, atStation],
+  );
 
   return (
     <>
@@ -477,13 +567,10 @@ function SceneContents({
         <Lightformer intensity={0.16} color="#ffe6c2" position={[10, 2, 8]} scale={[12, 6, 1]} />
       </Environment>
 
-      <Terrain />
-      <CityPavement />
+      {world}
 
       {/* Ратуша — главный объект в центре кадра */}
-      <group position={[TOWN_CENTER[0], GRASS_Y, TOWN_CENTER[1]]} scale={0.92}>
-        <TownHall level={levelOverride ?? townLevel} active={activeIndex >= 0} />
-      </group>
+      {hall}
 
       {placed.map((cat, i) => (
         <Station
@@ -492,23 +579,17 @@ function SceneContents({
           pos={posOf(i)}
           seconds={totals.get(cat.id) ?? 0}
           active={activeCategoryId === cat.id}
-          onOpen={onOpen}
+          onOpen={open}
           levelOverride={levelOverride}
         />
       ))}
 
       {/* Свободные места: размеченный участок под застройку, а не дыра в городе */}
-      {freeSlots.map(([x, z], i) => (
-        <group key={`lot-${i}`} position={[x, GRASS_Y, z]} scale={0.8}>
-          <VacantLot />
-        </group>
-      ))}
+      {lots}
 
       {/* Персонаж ростом с треть постройки, как на референсе. Раньше он был
           вровень с колоннами банка и читался великаном посреди деревни. */}
-      <group position={[charSpot[0], GRASS_Y, charSpot[1]]} rotation={[0, atStation ? -0.6 : 0.5, 0]}>
-        <Character3D working={atStation} scale={0.58} />
-      </group>
+      {hero}
 
       <FitCamera enabled={view === 'map'} />
       <DiveRig active={view === 'dive'} portal={portal} />
@@ -533,7 +614,15 @@ export function HomeScene(props: HomeSceneProps) {
   }, [totals]);
   // мир карты живёт на карте и во время нырка, интерьер — внутри и на подъёме
   const showMap = view === 'map' || view === 'dive';
-  const Interior = ZONE_3D[insideTheme].Interior;
+  /**
+   * Интерьер собирается один раз на уровень: внутри зоны таймер идёт ВСЕГДА, и
+   * без этого каждая его секунда прогоняла через React всю сцену цеха или
+   * хранилища — тысячи элементов. Именно от этого движение и шло рывками.
+   */
+  const interior = useMemo(() => {
+    const Interior = ZONE_3D[insideTheme].Interior;
+    return <Interior level={insideLevel} active={insideActive} />;
+  }, [insideTheme, insideLevel, insideActive]);
 
   return (
     <Canvas
@@ -562,17 +651,20 @@ export function HomeScene(props: HomeSceneProps) {
       }}
       // карта не двигается — жесты по холсту не перехватываем, страница живёт как обычно
       style={{ touchAction: 'manipulation' }}
+      // в разработке отдаём рендерер наружу: по gl.info.render.calls на стенде
+      // /dev-map.html сверяем, сколько поручений уходит видеочипу за кадр
+      onCreated={({ gl, scene }) => {
+        if (import.meta.env.DEV) {
+          Object.assign(window as unknown as Record<string, unknown>, { __gl: gl, __scene: scene });
+        }
+      }}
     >
       {/* тени пересчитываются реже, чем кадры — общее для карты и интерьеров */}
       <ShadowPacer />
       {/* на слабом устройстве разрешение отрисовки опускается само */}
       <AdaptiveQuality />
       <Suspense fallback={null}>
-        {showMap ? (
-          <SceneContents {...props} layout={layout} townLevel={townLevel} />
-        ) : (
-          <Interior level={insideLevel} active={insideActive} />
-        )}
+        {showMap ? <SceneContents {...props} layout={layout} townLevel={townLevel} /> : interior}
       </Suspense>
     </Canvas>
   );

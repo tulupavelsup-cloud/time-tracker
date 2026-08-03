@@ -5,19 +5,8 @@
  * Персонаж живёт отдельно — см. Character3D.tsx.
  */
 
-import { useRef } from 'react';
-import { useFrame } from '@react-three/fiber';
-import * as THREE from 'three';
-
 /** Временный знак-станция для зон без 3D-модели. */
 export function StationSign({ color = '#8b5cf6' }: { color?: string }) {
-  const gem = useRef<THREE.Mesh>(null);
-  useFrame((s) => {
-    if (gem.current) {
-      gem.current.rotation.y = s.clock.elapsedTime * 0.8;
-      gem.current.position.y = 1.15 + Math.sin(s.clock.elapsedTime * 1.6) * 0.06;
-    }
-  });
   return (
     <group>
       <mesh receiveShadow position={[0, 0.12, 0]}>
@@ -28,7 +17,7 @@ export function StationSign({ color = '#8b5cf6' }: { color?: string }) {
         <cylinderGeometry args={[0.07, 0.09, 0.9, 8]} />
         <meshStandardMaterial color="#8a5a33" roughness={0.9} />
       </mesh>
-      <mesh ref={gem} castShadow position={[0, 1.15, 0]}>
+      <mesh castShadow position={[0, 1.15, 0]} rotation={[0, 0.5, 0]}>
         <octahedronGeometry args={[0.24, 0]} />
         <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.35} roughness={0.3} metalness={0.2} flatShading />
       </mesh>

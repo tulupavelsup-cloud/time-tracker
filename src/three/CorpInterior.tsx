@@ -906,7 +906,7 @@ function Reception({ position, rot = 0, active, gold = false }: { position: [num
         <meshStandardMaterial color="#bfe6ff" emissive={SCREEN_EM} emissiveIntensity={active ? 0.9 : 0.35} roughness={0.4} />
       </mesh>
       {/* знак на фризе стойки */}
-      <Logo position={[0, 0.72, 0.32]} r={0.22} active={active} color={gold ? GOLD : BRAND} flat />
+      <Logo position={[0, 0.72, 0.32]} r={0.22} color={gold ? GOLD : BRAND} flat />
     </group>
   );
 }

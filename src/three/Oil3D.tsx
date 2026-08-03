@@ -9,14 +9,16 @@
  * 6 «Золотой фонтан»: золочёная вышка, ударивший фонтан нефти, золотые
  * резервуары и иллюминация.
  *
- * active (идёт таймер по этой категории) — промысел работает: качалки кивают,
- * талевый блок ходит по вышке, факел разгорается, фонтан бьёт выше, в окнах и
- * на щитах горит свет.
+ * Движется на промысле ровно КАЧАЛКА (кивает быстрее, когда идёт таймер).
+ * Остальное отзывается на работу неподвижно: талевый блок поднят под кронблок,
+ * факел выше, фонтан сильнее, лампы ярче. Так станция целиком спекается в один
+ * кусок (см. Baked.tsx).
  */
 
 import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { LIVE } from './Baked';
 import { Barrel, Crate, CrystalSpike } from './Mine3D';
 import { Person } from './Corp3D';
 import { BushField, ConiferField } from './Decor';
@@ -94,34 +96,17 @@ function OilPatch({ position, r = 0.6, seed = 1 }: { position: [number, number, 
  * На вершине зоны нефть с золотым отливом — тот самый «золотой фонтан».
  */
 function Gusher({ position, h = 1.6, active = false, gold = false }: { position: [number, number, number]; h?: number; active?: boolean; gold?: boolean }) {
-  const jet = useRef<THREE.Group>(null);
-  const drops = useRef<THREE.Group>(null);
-  const seeds = useMemo(() => Array.from({ length: 14 }, (_, i) => ({ a: rnd(i) * Math.PI * 2, v: 0.4 + rnd(i * 3) * 0.9, o: rnd(i * 7) })), []);
-  useFrame((s) => {
-    const t = s.clock.elapsedTime;
-    if (jet.current) {
-      const k = (active ? 1 : 0.55) + Math.sin(t * 3.1) * (active ? 0.12 : 0.05);
-      jet.current.scale.set(1, k, 1);
-    }
-    if (!drops.current) return;
-    drops.current.children.forEach((c, i) => {
-      const sd = seeds[i];
-      const u = (t * (active ? 0.75 : 0.42) + sd.o) % 1;
-      const m = c as THREE.Mesh;
-      // разлёт держим в пределах площадки: с широким разбросом капли
-      // разлетались далеко за края зоны и висели над травой
-      const reach = sd.v * (active ? 0.75 : 0.5);
-      m.position.set(Math.cos(sd.a) * reach * u, h * (0.85 + u * 0.5 - u * u * 1.5), Math.sin(sd.a) * reach * u);
-      m.scale.setScalar(0.7 + u * 0.5);
-    });
-  });
+  const seeds = useMemo(
+    () => Array.from({ length: 14 }, (_, i) => ({ a: rnd(i) * Math.PI * 2, v: 0.4 + rnd(i * 3) * 0.9, o: rnd(i * 7) })),
+    [],
+  );
   // На вершине струя золотится: чистый GOLD_D в тени читался бурой трубой, так
   // что берём цвет светлее и добавляем свечение — тогда это фонтан, а не столб.
   const c = gold ? GOLD : OIL;
   const cl = gold ? GOLD_L : OIL_L;
   return (
     <group position={position}>
-      <group ref={jet}>
+      <group scale={[1, active ? 1 : 0.55, 1]}>
         {/* столб струи и её раздутая шапка */}
         <mesh position={[0, h * 0.5, 0]}>
           <cylinderGeometry args={[0.11, 0.19, h, 12]} />
@@ -132,13 +117,24 @@ function Gusher({ position, h = 1.6, active = false, gold = false }: { position:
           <meshStandardMaterial color={cl} metalness={0.9} roughness={0.12} emissive={gold ? GOLD_D : '#000000'} emissiveIntensity={gold ? 0.3 : 0} />
         </mesh>
       </group>
-      <group ref={drops}>
-        {seeds.map((_, i) => (
-          <mesh key={i} castShadow>
-            <sphereGeometry args={[0.06, 8, 6]} />
-            <meshStandardMaterial color={i % 3 === 0 ? cl : c} metalness={0.88} roughness={0.14} emissive={gold ? GOLD_D : '#000000'} emissiveIntensity={gold ? 0.25 : 0} />
-          </mesh>
-        ))}
+      {/* капли разлетаются веером и висят в воздухе: раньше их гоняло покадрово,
+          теперь тот же разлёт разложен один раз при сборке */}
+      <group>
+        {seeds.map((sd, i) => {
+          const u = sd.o;
+          const reach = sd.v * (active ? 0.75 : 0.5);
+          return (
+            <mesh
+              key={i}
+              castShadow
+              position={[Math.cos(sd.a) * reach * u, h * (0.85 + u * 0.5 - u * u * 1.5), Math.sin(sd.a) * reach * u]}
+              scale={0.7 + u * 0.5}
+            >
+              <sphereGeometry args={[0.06, 8, 6]} />
+              <meshStandardMaterial color={i % 3 === 0 ? cl : c} metalness={0.88} roughness={0.14} emissive={gold ? GOLD_D : '#000000'} emissiveIntensity={gold ? 0.25 : 0} />
+            </mesh>
+          );
+        })}
       </group>
     </group>
   );
@@ -214,7 +210,7 @@ function Pumpjack({
       </mesh>
 
       {/* балансир: коромысло, головка и шатуны */}
-      <group ref={beam} position={[0, PIVOT + 0.06, -0.12]}>
+      <group ref={beam} userData={LIVE} position={[0, PIVOT + 0.06, -0.12]}>
         <mesh castShadow position={[0, 0.05, 0.14]}>
           <boxGeometry args={[0.15, 0.14, 1.78]} />
           <meshStandardMaterial color={metal} metalness={gold ? 0.55 : 0.3} roughness={0.55} />
@@ -241,7 +237,7 @@ function Pumpjack({
 
       {/* кривошип с противовесами и мотор */}
       <group position={[0, 0.52, -0.84]}>
-        <group ref={crank}>
+        <group ref={crank} userData={LIVE}>
           {[-1, 1].map((sx) => (
             <group key={sx} position={[sx * 0.18, 0, 0]}>
               <mesh castShadow rotation={[0, 0, Math.PI / 2]}>
@@ -272,7 +268,7 @@ function Pumpjack({
           <cylinderGeometry args={[0.11, 0.13, 0.1, 12]} />
           <meshStandardMaterial color={metal} metalness={gold ? 0.55 : 0.35} roughness={0.5} />
         </mesh>
-        <group ref={rod}>
+        <group ref={rod} userData={LIVE}>
           <mesh castShadow position={[0, 0.5, 0]}>
             <cylinderGeometry args={[0.03, 0.03, 0.52, 8]} />
             <meshStandardMaterial color={TRIM} metalness={0.7} roughness={0.2} />
@@ -358,23 +354,11 @@ function Derrick({
   active?: boolean;
   gold?: boolean;
 }) {
-  const block = useRef<THREE.Group>(null);
-  const rope = useRef<THREE.Mesh>(null);
-  const rotary = useRef<THREE.Group>(null);
   const belts = Math.max(3, Math.round(h / 0.44));
-  useFrame((s, dt) => {
-    const t = s.clock.elapsedTime;
-    const u = active ? (t * 0.09) % 1 : 0.55;
-    const k = u < 0.5 ? u * 2 : 2 - u * 2;
-    const y = 0.6 + k * (h - 1.05);
-    if (block.current) block.current.position.y = y;
-    if (rope.current) {
-      const len = h - 0.12 - y;
-      rope.current.scale.y = Math.max(0.02, len);
-      rope.current.position.y = y + len / 2;
-    }
-    if (rotary.current) rotary.current.rotation.y += dt * (active ? 2.6 : 0.3);
-  });
+  // Талевый блок: при работе поднят под кронблок, без работы — опущен к столу.
+  // Ходил вверх-вниз покадрово, но на общем плане ход не читался вовсе.
+  const blockY = 0.6 + (active ? 0.9 : 0.35) * (h - 1.05);
+  const ropeLen = Math.max(0.02, h - 0.12 - blockY);
   const metal = gold ? GOLD : STEEL;
   const metalD = gold ? GOLD_D : STEEL_D;
   /** Полуразмер вышки на высоте k (0..1). */
@@ -456,11 +440,11 @@ function Derrick({
         <cylinderGeometry args={[top * 0.7, top * 0.7, 0.06, 12]} />
         <meshStandardMaterial color={metal} metalness={0.55} roughness={0.4} />
       </mesh>
-      <mesh ref={rope} position={[0, h * 0.7, 0]}>
+      <mesh position={[0, blockY + ropeLen / 2, 0]} scale={[1, ropeLen, 1]}>
         <cylinderGeometry args={[0.012, 0.012, 1, 5]} />
         <meshStandardMaterial color="#2f353d" metalness={0.4} roughness={0.6} />
       </mesh>
-      <group ref={block} position={[0, 1.2, 0]}>
+      <group position={[0, blockY, 0]}>
         <mesh castShadow>
           <boxGeometry args={[0.17, 0.26, 0.15]} />
           <meshStandardMaterial color={SIGNAL} metalness={0.35} roughness={0.55} />
@@ -472,7 +456,7 @@ function Derrick({
       </group>
 
       {/* ротор и бурильная колонна на площадке */}
-      <group ref={rotary} position={[0, 0.24, 0]}>
+      <group position={[0, 0.24, 0]}>
         <mesh castShadow receiveShadow>
           <cylinderGeometry args={[0.19, 0.21, 0.08, 14]} />
           <meshStandardMaterial color={STEEL_D} metalness={0.5} roughness={0.5} />
@@ -664,17 +648,6 @@ function Column({ position, h = 1.6, r = 0.19, gold = false }: { position: [numb
 
 /** Факельная свеча: мачта с горелкой, живое пламя и тёплый свет вокруг. */
 function Flare({ position, h = 1.5, active = false, gold = false }: { position: [number, number, number]; h?: number; active?: boolean; gold?: boolean }) {
-  const flame = useRef<THREE.Group>(null);
-  const light = useRef<THREE.PointLight>(null);
-  useFrame((s) => {
-    const t = s.clock.elapsedTime;
-    if (flame.current) {
-      const k = (active ? 1 : 0.5) + Math.sin(t * 9) * 0.14 + Math.sin(t * 15.7) * 0.07;
-      flame.current.scale.set(0.9 + Math.sin(t * 11) * 0.08, k, 0.9 + Math.cos(t * 13) * 0.08);
-      flame.current.rotation.z = Math.sin(t * 4) * 0.09;
-    }
-    if (light.current) light.current.intensity = (active ? 1.8 : 0.8) + Math.sin(t * 10) * 0.35;
-  });
   return (
     <group position={position}>
       <mesh receiveShadow position={[0, 0.03, 0]}>
@@ -704,7 +677,7 @@ function Flare({ position, h = 1.5, active = false, gold = false }: { position: 
         <cylinderGeometry args={[0.09, 0.07, 0.16, 10]} />
         <meshStandardMaterial color={STEEL_D} metalness={0.5} roughness={0.5} />
       </mesh>
-      <group ref={flame} position={[0, h + 0.16, 0]}>
+      <group position={[0, h + 0.16, 0]} scale={[0.95, active ? 1 : 0.5, 0.95]}>
         <mesh position={[0, 0.24, 0]}>
           <coneGeometry args={[0.11, 0.5, 9]} />
           <meshStandardMaterial color={FLAME} emissive="#ff6a12" emissiveIntensity={2} transparent opacity={0.85} roughness={0.3} />
@@ -714,7 +687,7 @@ function Flare({ position, h = 1.5, active = false, gold = false }: { position: 
           <meshStandardMaterial color={FLAME_HOT} emissive={FLAME_HOT} emissiveIntensity={2.4} roughness={0.2} />
         </mesh>
       </group>
-      <pointLight ref={light} position={[0, h + 0.3, 0]} color="#ff9b45" intensity={1.4} distance={3.6} decay={2} />
+      <pointLight position={[0, h + 0.3, 0]} color="#ff9b45" intensity={active ? 1.8 : 0.9} distance={3.6} decay={2} />
     </group>
   );
 }
@@ -770,11 +743,7 @@ function TankTruck({ position, rot = 0, s = 0.8, gold = false }: { position: [nu
 }
 
 /** Тренога с ручным буром — самая первая разведка. */
-function HandRig({ position, rot = 0, active = false }: { position: [number, number, number]; rot?: number; active?: boolean }) {
-  const wheel = useRef<THREE.Group>(null);
-  useFrame((_, dt) => {
-    if (wheel.current) wheel.current.rotation.x += dt * (active ? 1.6 : 0.25);
-  });
+function HandRig({ position, rot = 0 }: { position: [number, number, number]; rot?: number }) {
   return (
     <group position={position} rotation={[0, rot, 0]}>
       {[0, 1, 2].map((i) => {
@@ -786,7 +755,7 @@ function HandRig({ position, rot = 0, active = false }: { position: [number, num
         <meshStandardMaterial color={STEEL_D} metalness={0.5} roughness={0.5} />
       </mesh>
       {/* блок и трос к буру */}
-      <group ref={wheel} position={[0, 0.92, 0]}>
+      <group position={[0, 0.92, 0]}>
         <mesh rotation={[0, 0, Math.PI / 2]}>
           <torusGeometry args={[0.07, 0.018, 6, 14]} />
           <meshStandardMaterial color={STEEL} metalness={0.55} roughness={0.4} />
@@ -914,10 +883,6 @@ function Trailer({ position, rot = 0, active = false }: { position: [number, num
 
 /** Насосная станция: блок с манометрами и мигающей лампой готовности. */
 function PumpHouse({ position, rot = 0, active = false }: { position: [number, number, number]; rot?: number; active?: boolean }) {
-  const led = useRef<THREE.MeshStandardMaterial>(null);
-  useFrame((s) => {
-    if (led.current) led.current.emissiveIntensity = active ? 0.5 + Math.abs(Math.sin(s.clock.elapsedTime * 3.4)) * 1.4 : 0.25;
-  });
   return (
     <group position={position} rotation={[0, rot, 0]}>
       <mesh receiveShadow position={[0, 0.03, 0]}>
@@ -941,7 +906,7 @@ function PumpHouse({ position, rot = 0, active = false }: { position: [number, n
       ))}
       <mesh position={[0.22, 0.32, 0.21]}>
         <sphereGeometry args={[0.04, 8, 6]} />
-        <meshStandardMaterial ref={led} color={GREEN_LED} emissive="#2fd37a" emissiveIntensity={0.4} roughness={0.4} />
+        <meshStandardMaterial color={GREEN_LED} emissive="#2fd37a" emissiveIntensity={active ? 1.2 : 0.4} roughness={0.4} />
       </mesh>
       {/* отвод в трубопровод */}
       <mesh castShadow position={[0, 0.14, 0.3]} rotation={[Math.PI / 2, 0, 0]}>
@@ -1015,7 +980,7 @@ export function Oil3D({ level, active = false }: { level: number; active?: boole
         {lvl === 0 && (
           <group>
             <OilPatch position={[0.42, 0, -0.28]} r={0.62} />
-            <HandRig position={[0.42, 0, -0.28]} active={active} />
+            <HandRig position={[0.42, 0, -0.28]} />
             <Tent position={[-0.78, 0, 0.52]} rot={0.3} active={active} />
             <Barrel position={[0.98, 0, 0.52]} rot={0.4} />
             <Barrel position={[1.18, 0, 0.34]} rot={-0.5} />

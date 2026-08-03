@@ -6,17 +6,20 @@
  * с газоотводом и ракета-зонд на нём → 3 ферма обслуживания, ракета в лесах,
  * топливные баки → 4 космодром: полноразмерная ракета между двумя фермами,
  * радар, посадочные огни → 5 два стола: на втором космоплан, диспетчерская
- * вышка, топливный парк, тягач → 6 «Звёздные врата»: ракета уходит вверх на
- * столбе пламени, орбитальное кольцо, золочёные купола, шаттлы в небе.
+ * вышка, топливный парк, тягач → 6 «Звёздные врата»: ракета на столбе пламени,
+ * золочёные купола.
  *
- * active (идёт таймер по этой категории) — стартовая готовность: двигатели
- * ракеты работают и она отрывается от стола, радар вращается быстрее, посадочные
- * огни бегут по кругу, лифт фермы ездит, в ангаре горит свет.
+ * Движется на космопорте ровно РАДАР (быстрее, когда идёт таймер). Орбитальное
+ * кольцо и шаттлы, летавшие кругами в небе, убраны совсем — это и были те самые
+ * «кружки» в кадре. Остальное отзывается на работу неподвижно: ракета висит над
+ * столом на факеле, лифт фермы поднят, огни и окна горят ярче. Так станция
+ * целиком спекается в один кусок (см. Baked.tsx).
  */
 
 import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { LIVE } from './Baked';
 import { CrystalSpike, Crate } from './Mine3D';
 import { Person } from './Corp3D';
 import { BushField, ConiferField } from './Decor';
@@ -56,22 +59,16 @@ export function Emblem({
   position,
   r = 0.24,
   rotY = 0,
-  active = false,
   color = ACCENT,
 }: {
   position: [number, number, number];
   r?: number;
   rotY?: number;
-  active?: boolean;
   color?: string;
 }) {
-  const ring = useRef<THREE.Group>(null);
-  useFrame((_, dt) => {
-    if (ring.current) ring.current.rotation.z += dt * (active ? 0.5 : 0.08);
-  });
   return (
     <group position={position} rotation={[0, rotY, 0]}>
-      <group ref={ring} rotation={[0.5, 0, 0]}>
+      <group rotation={[0.5, 0, 0]}>
         <mesh>
           <torusGeometry args={[r, r * 0.12, 8, 22]} />
           <meshStandardMaterial color={color} emissive={color} emissiveIntensity={0.25} metalness={0.4} roughness={0.4} />
@@ -154,17 +151,8 @@ function Marker({ position, rot = 0 }: { position: [number, number, number]; rot
   );
 }
 
-/**
- * Посадочный огонь. Бегущая волна по кругу: у каждого свой сдвиг фазы, поэтому
- * огни зажигаются один за другим — площадка «дышит», как настоящая полоса.
- */
-function Beacon({ position, phase = 0, active = false }: { position: [number, number, number]; phase?: number; active?: boolean }) {
-  const mat = useRef<THREE.MeshStandardMaterial>(null);
-  useFrame((s) => {
-    if (!mat.current) return;
-    const t = s.clock.elapsedTime * (active ? 2.6 : 0.9) - phase;
-    mat.current.emissiveIntensity = 0.3 + Math.max(0, Math.sin(t)) * (active ? 2.2 : 1);
-  });
+/** Посадочный огонь: столбик с плафоном, при работе горит ярче. */
+function Beacon({ position, active = false }: { position: [number, number, number]; active?: boolean }) {
   return (
     <group position={position}>
       <mesh castShadow position={[0, 0.07, 0]}>
@@ -173,7 +161,7 @@ function Beacon({ position, phase = 0, active = false }: { position: [number, nu
       </mesh>
       <mesh position={[0, 0.16, 0]}>
         <sphereGeometry args={[0.045, 10, 8]} />
-        <meshStandardMaterial ref={mat} color="#ffe9b0" emissive={SIGNAL} emissiveIntensity={0.5} roughness={0.35} />
+        <meshStandardMaterial color="#ffe9b0" emissive={SIGNAL} emissiveIntensity={active ? 1.4 : 0.9} roughness={0.35} />
       </mesh>
     </group>
   );
@@ -249,7 +237,7 @@ function Hangar({
         <boxGeometry args={[r * 1.05, 0.045, 0.012]} />
         <meshStandardMaterial color={ACCENT} emissive={ACCENT} emissiveIntensity={0.25} roughness={0.6} />
       </mesh>
-      <Emblem position={[0, gate + 0.24, len / 2 + 0.04]} r={r * 0.22} active={active} color={gold ? GOLD_D : ACCENT} />
+      <Emblem position={[0, gate + 0.24, len / 2 + 0.04]} r={r * 0.22} color={gold ? GOLD_D : ACCENT} />
     </group>
   );
 }
@@ -312,7 +300,7 @@ function LaunchPad({ position, r = 0.62, h = 0.3, active = false }: { position: 
       {/* огни по краю стола */}
       {[0, 1, 2, 3, 4, 5].map((i) => {
         const a = (i / 6) * Math.PI * 2;
-        return <Beacon key={i} position={[Math.cos(a) * r * 1.34, 0.04, Math.sin(a) * r * 1.34]} phase={i * 0.55} active={active} />;
+        return <Beacon key={i} position={[Math.cos(a) * r * 1.34, 0.04, Math.sin(a) * r * 1.34]} active={active} />;
       })}
     </group>
   );
@@ -321,37 +309,14 @@ function LaunchPad({ position, r = 0.62, h = 0.3, active = false }: { position: 
 /* ───────────────────────── ракета ───────────────────────── */
 
 /**
- * Столб пламени и дым под соплами. Языки живут своей частотой, свет пульсирует,
- * клубы дыма расходятся в стороны и тают — по ним и читается «стартует».
+ * Столб пламени и дым под соплами. Клубы разложены по кругу и растут к краю —
+ * тот же кадр, что раньше рисовался покадрово, только теперь он застывший.
  */
 function Plume({ r = 0.2, active = false }: { r?: number; active?: boolean }) {
-  const core = useRef<THREE.Group>(null);
-  const smoke = useRef<THREE.Group>(null);
-  const light = useRef<THREE.PointLight>(null);
-  useFrame((s) => {
-    const t = s.clock.elapsedTime;
-    if (core.current) {
-      core.current.children.forEach((c, i) => {
-        c.scale.y = 1 + Math.sin(t * (13 + i * 2.5)) * 0.22;
-      });
-    }
-    if (light.current) light.current.intensity = (active ? 3.2 : 1.4) + Math.sin(t * 11) * 0.6;
-    if (smoke.current) {
-      smoke.current.children.forEach((c, i) => {
-        const u = ((t * (active ? 0.55 : 0.28) + i * 0.24) % 1);
-        const m = c as THREE.Mesh;
-        const mat = m.material as THREE.MeshStandardMaterial;
-        const a = (i / smoke.current!.children.length) * Math.PI * 2;
-        m.position.set(Math.cos(a) * (r * 1.2 + u * r * 5), u * r * 1.1, Math.sin(a) * (r * 1.2 + u * r * 5));
-        m.scale.setScalar(0.4 + u * 1.9);
-        mat.opacity = 0.5 * (1 - u);
-      });
-    }
-  });
   return (
     <group>
       {/* факелы: горячее ядро и внешний конус */}
-      <group ref={core}>
+      <group>
         <mesh position={[0, -r * 1.5, 0]}>
           <coneGeometry args={[r * 0.72, r * 3, 10]} />
           <meshStandardMaterial color={FLAME_HOT} emissive={FLAME_HOT} emissiveIntensity={2.4} transparent opacity={0.95} roughness={0.2} />
@@ -361,15 +326,23 @@ function Plume({ r = 0.2, active = false }: { r?: number; active?: boolean }) {
           <meshStandardMaterial color={FLAME} emissive="#ff7a1a" emissiveIntensity={1.9} transparent opacity={0.62} roughness={0.3} />
         </mesh>
       </group>
-      <pointLight ref={light} position={[0, -r, 0]} color="#ffb257" intensity={2.4} distance={4.5} decay={2} />
-      {/* клубы дыма у основания */}
-      <group ref={smoke}>
-        {Array.from({ length: 7 }, (_, i) => (
-          <mesh key={i}>
-            <sphereGeometry args={[r * 0.9, 8, 6]} />
-            <meshStandardMaterial color="#e7e3dc" transparent opacity={0.4} roughness={1} depthWrite={false} />
-          </mesh>
-        ))}
+      <pointLight position={[0, -r, 0]} color="#ffb257" intensity={active ? 3.2 : 2.4} distance={4.5} decay={2} />
+      {/* клубы дыма у основания: по кругу, чем дальше — тем крупнее и прозрачнее */}
+      <group>
+        {Array.from({ length: 7 }, (_, i) => {
+          const u = (i + 0.5) / 7;
+          const a = (i / 7) * Math.PI * 2;
+          return (
+            <mesh
+              key={i}
+              position={[Math.cos(a) * (r * 1.2 + u * r * 5), u * r * 1.1, Math.sin(a) * (r * 1.2 + u * r * 5)]}
+              scale={0.4 + u * 1.9}
+            >
+              <sphereGeometry args={[r * 0.9, 8, 6]} />
+              <meshStandardMaterial color="#e7e3dc" transparent opacity={0.5 * (1 - u)} roughness={1} depthWrite={false} />
+            </mesh>
+          );
+        })}
       </group>
     </group>
   );
@@ -401,24 +374,7 @@ export function Rocket({
   gold?: boolean;
   launch?: boolean;
 }) {
-  const body = useRef<THREE.Group>(null);
   const fire = launch && active;
-  useFrame((s) => {
-    if (!body.current) return;
-    const t = s.clock.elapsedTime;
-    if (fire) {
-      // Оторвалась от стола (LIFTOFF) и качается на столбе пламени, поднимаясь
-      // на 0.55 за 6 с и мягко возвращаясь — зона при этом не пустеет. Отрыв
-      // обязателен: без него факел уходил внутрь стартового стола и его не было
-      // видно вовсе.
-      const u = (t % 6) / 6;
-      body.current.position.y = LIFTOFF + Math.sin(u * Math.PI) * 0.55;
-      body.current.rotation.z = Math.sin(t * 3.4) * 0.012;
-    } else {
-      body.current.position.y = launch ? Math.sin(t * 0.9) * 0.02 : 0;
-      body.current.rotation.z = 0;
-    }
-  });
 
   const skin = gold ? GOLD_L : HULL;
   const skinD = gold ? GOLD : HULL_D;
@@ -427,7 +383,10 @@ export function Rocket({
 
   return (
     <group position={position}>
-      <group ref={body}>
+      {/* Работают двигатели — ракета висит над столом на столбе пламени (LIFTOFF).
+          Отрыв обязателен: без него факел уходит внутрь стартового стола и его
+          не видно вовсе. Полёт вверх убран — на карте двигалась ОДНА вещь. */}
+      <group position={[0, fire ? LIFTOFF + 0.28 : 0, 0]}>
         {/* первая ступень */}
         <mesh castShadow receiveShadow position={[0, stage1 / 2, 0]}>
           <cylinderGeometry args={[r, r * 1.04, stage1, 18]} />
@@ -462,7 +421,7 @@ export function Rocket({
             <meshStandardMaterial color={GLASS} emissive={active ? CYAN_EM : '#12222c'} emissiveIntensity={active ? 0.6 : 0.15} metalness={0.5} roughness={0.2} />
           </mesh>
         ))}
-        <Emblem position={[0, h * 0.66, r * 0.9]} r={r * 0.42} active={active} color={gold ? GOLD_D : ACCENT} />
+        <Emblem position={[0, h * 0.66, r * 0.9]} r={r * 0.42} color={gold ? GOLD_D : ACCENT} />
         {/* кили */}
         {[0, 1, 2].map((i) => {
           const a = (i / 3) * Math.PI * 2 + 0.5;
@@ -520,15 +479,7 @@ function Gantry({
   arm?: number;
   active?: boolean;
 }) {
-  const lift = useRef<THREE.Group>(null);
   const belts = Math.max(3, Math.round(h / 0.42));
-  useFrame((s) => {
-    if (!lift.current) return;
-    const u = (s.clock.elapsedTime * (active ? 0.16 : 0.05)) % 1;
-    // вверх и вниз по ферме, с задержками на концах
-    const k = u < 0.5 ? Math.min(1, u / 0.42) : Math.max(0, 1 - (u - 0.5) / 0.42);
-    lift.current.position.y = 0.24 + k * (h - 0.6);
-  });
   return (
     <group position={position} rotation={[0, rot, 0]}>
       {/* башмаки и стойки */}
@@ -578,7 +529,7 @@ function Gantry({
         );
       })}
       {/* лифт-кабина */}
-      <group ref={lift} position={[0, 0.24, 0]}>
+      <group position={[0, 0.24 + (active ? (h - 0.6) * 0.55 : 0), 0]}>
         <mesh castShadow position={[w + 0.09, 0, 0]}>
           <boxGeometry args={[0.16, 0.2, 0.22]} />
           <meshStandardMaterial color={SIGNAL} metalness={0.3} roughness={0.6} />
@@ -608,7 +559,7 @@ function Gantry({
         </group>
       )}
       {/* проблесковый огонь на макушке */}
-      <Beacon position={[0, h, 0]} phase={0.3} active={active} />
+      <Beacon position={[0, h, 0]} active={active} />
     </group>
   );
 }
@@ -688,7 +639,7 @@ function Dish({ position, s = 1, active = false }: { position: [number, number, 
         <cylinderGeometry args={[0.045, 0.06, 0.5, 8]} />
         <meshStandardMaterial color={STEEL} metalness={0.5} roughness={0.5} />
       </mesh>
-      <group ref={head} position={[0, 0.56, 0]}>
+      <group ref={head} userData={LIVE} position={[0, 0.56, 0]}>
         <mesh castShadow>
           <boxGeometry args={[0.16, 0.12, 0.16]} />
           <meshStandardMaterial color={STEEL_D} metalness={0.5} roughness={0.5} />
@@ -748,7 +699,7 @@ function ControlTower({ position, h = 1.3, active = false, gold = false }: { pos
         <cylinderGeometry args={[0.012, 0.018, 0.36, 6]} />
         <meshStandardMaterial color={STEEL_D} metalness={0.5} roughness={0.5} />
       </mesh>
-      <Beacon position={[0, h + 0.62, 0]} phase={1.2} active={active} />
+      <Beacon position={[0, h + 0.62, 0]} active={active} />
       {active && <pointLight position={[0, h + 0.16, 0.3]} color="#ffd08a" intensity={0.6} distance={2.4} decay={2} />}
     </group>
   );
@@ -871,111 +822,6 @@ function Crawler({ position, rot = 0, load = true }: { position: [number, number
   );
 }
 
-/**
- * Орбитальное кольцо — знак вершины: наклонённый обод с бегущими по нему
- * огнями, сквозь который уходит ракета.
- */
-function OrbitRing({ position, r = 1.15, active = false }: { position: [number, number, number]; r?: number; active?: boolean }) {
-  const ring = useRef<THREE.Group>(null);
-  const lights = useRef<THREE.Group>(null);
-  useFrame((s, dt) => {
-    if (ring.current) ring.current.rotation.z += dt * (active ? 0.32 : 0.08);
-    if (!lights.current) return;
-    const t = s.clock.elapsedTime * (active ? 3 : 1.1);
-    lights.current.children.forEach((c, i) => {
-      const m = (c as THREE.Mesh).material as THREE.MeshStandardMaterial;
-      m.emissiveIntensity = 0.35 + Math.max(0, Math.sin(t - i * 0.5)) * 1.9;
-    });
-  });
-  return (
-    <group position={position} rotation={[0.42, 0.3, 0]}>
-      <group ref={ring}>
-        <mesh castShadow>
-          <torusGeometry args={[r, 0.05, 8, 40]} />
-          <meshStandardMaterial color={GOLD_L} emissive={GOLD_D} emissiveIntensity={active ? 0.5 : 0.22} metalness={0.6} roughness={0.3} />
-        </mesh>
-        <mesh>
-          <torusGeometry args={[r * 0.9, 0.02, 6, 36]} />
-          <meshStandardMaterial color={TRIM} emissive={CYAN_EM} emissiveIntensity={active ? 0.6 : 0.2} metalness={0.4} roughness={0.35} />
-        </mesh>
-        {/* спицы к ободу */}
-        {[0, 1, 2, 3].map((i) => {
-          const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
-          return (
-            <mesh key={i} position={[Math.cos(a) * r * 0.95, Math.sin(a) * r * 0.95, 0]} rotation={[0, 0, a]}>
-              <boxGeometry args={[r * 0.12, 0.035, 0.035]} />
-              <meshStandardMaterial color={GOLD} metalness={0.55} roughness={0.35} />
-            </mesh>
-          );
-        })}
-      </group>
-      <group ref={lights}>
-        {Array.from({ length: 8 }, (_, i) => {
-          const a = (i / 8) * Math.PI * 2;
-          return (
-            <mesh key={i} position={[Math.cos(a) * r, Math.sin(a) * r, 0.06]}>
-              <sphereGeometry args={[0.038, 8, 6]} />
-              <meshStandardMaterial color="#e8f7ff" emissive={CYAN_EM} emissiveIntensity={0.8} roughness={0.3} />
-            </mesh>
-          );
-        })}
-      </group>
-    </group>
-  );
-}
-
-/** Шаттл в небе: летает по кругу над космопортом, оставляя за собой факел. */
-function Flyer({
-  radius = 1.4,
-  y = 2.2,
-  phase = 0,
-  speed = 0.4,
-  active = false,
-}: {
-  radius?: number;
-  y?: number;
-  phase?: number;
-  speed?: number;
-  active?: boolean;
-}) {
-  const body = useRef<THREE.Group>(null);
-  const trail = useRef<THREE.Mesh>(null);
-  useFrame((s) => {
-    const t = s.clock.elapsedTime * speed * (active ? 1.7 : 0.7) + phase;
-    if (body.current) {
-      body.current.position.set(Math.cos(t) * radius, y + Math.sin(t * 1.6) * 0.12, Math.sin(t) * radius);
-      body.current.rotation.set(0, -t + Math.PI / 2, 0.18);
-    }
-    if (trail.current) {
-      const m = trail.current.material as THREE.MeshStandardMaterial;
-      m.emissiveIntensity = active ? 1.6 + Math.sin(t * 9) * 0.4 : 0.5;
-      trail.current.scale.z = active ? 1.4 + Math.sin(t * 7) * 0.25 : 0.7;
-    }
-  });
-  return (
-    <group ref={body}>
-      <mesh castShadow rotation={[Math.PI / 2, 0, 0]}>
-        <capsuleGeometry args={[0.048, 0.19, 4, 10]} />
-        <meshStandardMaterial color={HULL} metalness={0.35} roughness={0.45} />
-      </mesh>
-      <mesh position={[0, 0, 0.16]} rotation={[Math.PI / 2, 0, 0]}>
-        <coneGeometry args={[0.048, 0.09, 10]} />
-        <meshStandardMaterial color={ACCENT} roughness={0.45} />
-      </mesh>
-      {[-1, 1].map((sx) => (
-        <mesh key={sx} position={[sx * 0.09, -0.005, -0.04]} rotation={[0, 0, -sx * 0.15]}>
-          <boxGeometry args={[0.16, 0.014, 0.17]} />
-          <meshStandardMaterial color={HULL_D} metalness={0.3} roughness={0.5} flatShading />
-        </mesh>
-      ))}
-      <mesh ref={trail} position={[0, 0, -0.2]} rotation={[-Math.PI / 2, 0, 0]}>
-        <coneGeometry args={[0.035, 0.24, 8]} />
-        <meshStandardMaterial color={FLAME_HOT} emissive={FLAME} emissiveIntensity={1.2} transparent opacity={0.85} roughness={0.25} />
-      </mesh>
-    </group>
-  );
-}
-
 /** Контейнер-бытовка первых уровней: вагончик с дверью и окном. */
 function Container({ position, rot = 0, active = false }: { position: [number, number, number]; rot?: number; active?: boolean }) {
   return (
@@ -1014,7 +860,7 @@ function Container({ position, rot = 0, active = false }: { position: [number, n
         <boxGeometry args={[0.3, 0.06, 0.16]} />
         <meshStandardMaterial color={STEEL} metalness={0.35} roughness={0.7} />
       </mesh>
-      <Emblem position={[0.22, 0.62, 0]} r={0.11} active={active} color={ACCENT} />
+      <Emblem position={[0.22, 0.62, 0]} r={0.11} color={ACCENT} />
     </group>
   );
 }
@@ -1041,12 +887,8 @@ function Canister({ position, rot = 0, color = ACCENT }: { position: [number, nu
   );
 }
 
-/** Мачта с флагом космопорта — качается на ветру. */
+/** Мачта с флагом космопорта. */
 function FlagMast({ position, h = 1.0, active = false }: { position: [number, number, number]; h?: number; active?: boolean }) {
-  const flag = useRef<THREE.Group>(null);
-  useFrame((s) => {
-    if (flag.current) flag.current.rotation.y = Math.sin(s.clock.elapsedTime * (active ? 2.2 : 1.1)) * 0.22;
-  });
   return (
     <group position={position}>
       <mesh castShadow position={[0, 0.04, 0]}>
@@ -1057,14 +899,14 @@ function FlagMast({ position, h = 1.0, active = false }: { position: [number, nu
         <cylinderGeometry args={[0.016, 0.022, h, 8]} />
         <meshStandardMaterial color={TRIM} metalness={0.4} roughness={0.5} />
       </mesh>
-      <group ref={flag} position={[0, h - 0.04, 0]}>
+      <group position={[0, h - 0.04, 0]} rotation={[0, 0.18, 0]}>
         <mesh castShadow position={[0.18, 0, 0]}>
           <boxGeometry args={[0.34, 0.22, 0.01]} />
           <meshStandardMaterial color={NAVY} roughness={0.85} side={THREE.DoubleSide} />
         </mesh>
-        <Emblem position={[0.18, 0, 0.012]} r={0.075} active={active} color={ACCENT} />
+        <Emblem position={[0.18, 0, 0.012]} r={0.075} color={ACCENT} />
       </group>
-      <Beacon position={[0, h + 0.12, 0]} phase={2} active={active} />
+      <Beacon position={[0, h + 0.12, 0]} active={active} />
     </group>
   );
 }
@@ -1222,7 +1064,7 @@ export function Space3D({ level, active = false }: { level: number; active?: boo
             <Person s={0.66} position={[0.16, 0, 0.72]} rot={2.2} suit="#33475e" helmet="#e8e2d6" />
             <Crate position={[-0.88, 0.14, 0.24]} s={0.28} rot={0.5} />
             {rimLights.slice(0, 5).map((b, i) => (
-              <Beacon key={i} position={[b.x, 0, b.z]} phase={b.phase} active={active} />
+              <Beacon key={i} position={[b.x, 0, b.z]} active={active} />
             ))}
           </group>
         )}
@@ -1251,9 +1093,8 @@ export function Space3D({ level, active = false }: { level: number; active?: boo
             <Person s={0.66} position={[0.08, 0, 0.76]} rot={2.2} suit="#33475e" helmet="#e8e2d6" />
             <Person s={0.66} position={[-0.84, 0, 0.42]} rot={-1.4} suit="#44607c" helmet="#f2b13c" vest />
             {rimLights.map((b, i) => (
-              <Beacon key={i} position={[b.x, 0, b.z]} phase={b.phase} active={active} />
+              <Beacon key={i} position={[b.x, 0, b.z]} active={active} />
             ))}
-            <Flyer radius={1.5} y={2.6} phase={0} speed={0.44} active={active} />
             {active && <pointLight position={[0.3, 1.4, 0.6]} color="#ffd08a" intensity={0.9} distance={3.6} decay={2} />}
           </group>
         )}
@@ -1264,7 +1105,6 @@ export function Space3D({ level, active = false }: { level: number; active?: boo
             <Hangar position={[-1.16, 0, FRONT_Z - 0.54]} r={0.66} len={1.28} rot={0.2} active={active} gold />
             <LaunchPad position={[0.16, 0, -0.62]} r={0.64} h={0.34} active={active} />
             <Rocket position={[0.16, 0.48, -0.62]} h={2.5} r={0.22} active={active} gold launch />
-            <OrbitRing position={[0.16, 2.5, -0.62]} r={1.1} active={active} />
             <Gantry position={[1.16, 0, -0.62]} h={2.5} w={0.24} rot={-Math.PI / 2} arm={0.4} active={active} />
 
             {/* второй стол: космоплан на золочёной площадке */}
@@ -1282,14 +1122,11 @@ export function Space3D({ level, active = false }: { level: number; active?: boo
             <Person s={0.66} position={[-0.06, 0, 0.82]} rot={2.2} suit="#33475e" helmet="#e8e2d6" />
             <Person s={0.66} position={[-0.9, 0, 0.5]} rot={-1.4} suit="#44607c" helmet="#f2b13c" vest />
             {rimLights.map((b, i) => (
-              <Beacon key={i} position={[b.x, 0, b.z]} phase={b.phase} active={active} />
+              <Beacon key={i} position={[b.x, 0, b.z]} active={active} />
             ))}
             <CrystalSpike position={[-1.42, 0, 0.94]} s={0.6} gold />
             <CrystalSpike position={[1.5, 0, 0.06]} s={0.5} gold />
             <CrystalSpike position={[0.9, 0, 1.3]} s={0.44} gold />
-            <Flyer radius={1.6} y={2.8} phase={0} speed={0.42} active={active} />
-            <Flyer radius={1.25} y={3.3} phase={2.3} speed={0.36} active={active} />
-            <Flyer radius={1.85} y={2.1} phase={4.4} speed={0.3} active={active} />
             {active && <pointLight position={[0.16, 1.6, 0.7]} color="#ffd58a" intensity={1.2} distance={4.4} decay={2} />}
           </group>
         )}

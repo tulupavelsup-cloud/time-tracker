@@ -8,16 +8,19 @@
  * золотым логотипом-шестернёй на фасаде и стилобатом → 5 квартал: вторая башня,
  * переход-мост между ними, вертолётная площадка, медиаэкран, свет в окнах →
  * 6 «Global Monolith»: шпиль с часами-шестернями, два золочёных крыла с
- * вертолётами, дроны, фонтан на площади, кристаллы и иллюминация.
+ * вертолётами, фонтан на площади, кристаллы и иллюминация.
  *
- * active (идёт таймер по этой категории) — шестерни логотипа крутятся, винты
- * вертолётов раскручиваются, дроны летают быстрее, медиаэкран мигает, окна и
- * фонтан горят ярче.
+ * Движется в квартале ровно ВИНТ ВЕРТОЛЁТА (раскручивается, когда идёт таймер).
+ * Летавшие над кварталом дроны убраны совсем — тёмные кружки в небе читались
+ * мусором в кадре, а стоили каждый по своему пересчёту за кадр. Медиаэкран,
+ * окна, фонарь антенны и фонтан просто ярче при работе, но не мигают: так
+ * станция целиком спекается в один кусок (см. Baked.tsx).
  */
 
 import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { LIVE } from './Baked';
 import { CrystalSpike } from './Mine3D';
 import { BushField, ConiferField, LampPost } from './Decor';
 
@@ -57,27 +60,21 @@ export function Logo({
   position,
   r = 0.3,
   rotY = 0,
-  active = false,
   color = BRAND,
   flat = false,
 }: {
   position: [number, number, number];
   r?: number;
   rotY?: number;
-  active?: boolean;
   /** Цвет металла знака */
   color?: string;
   /** Плоский (на щите/флаге) — без объёмных зубцов, чтобы не торчал */
   flat?: boolean;
 }) {
-  const gear = useRef<THREE.Group>(null);
-  useFrame((_, dt) => {
-    if (gear.current) gear.current.rotation.z += dt * (active ? 0.55 : 0.08);
-  });
   const t = r * 0.16;
   return (
     <group position={position} rotation={[0, rotY, 0]}>
-      <group ref={gear}>
+      <group>
         {/* обод */}
         <mesh>
           <torusGeometry args={[r * 0.74, t, 8, 22]} />
@@ -223,7 +220,7 @@ function Boxes({ position, rot = 0, s = 1 }: { position: [number, number, number
 }
 
 /** Щит проекта на двух ногах: логотип и «строки» текста. */
-function SiteSign({ position, rot = 0, active = false }: { position: [number, number, number]; rot?: number; active?: boolean }) {
+function SiteSign({ position, rot = 0 }: { position: [number, number, number]; rot?: number }) {
   return (
     <group position={position} rotation={[0, rot, 0]}>
       {[-1, 1].map((sx) => (
@@ -236,7 +233,7 @@ function SiteSign({ position, rot = 0, active = false }: { position: [number, nu
         <boxGeometry args={[0.92, 0.44, 0.05]} />
         <meshStandardMaterial color="#dfe3e8" roughness={0.85} />
       </mesh>
-      <Logo position={[-0.26, 0.58, 0.04]} r={0.15} active={active} flat />
+      <Logo position={[-0.26, 0.58, 0.04]} r={0.15} flat />
       {[0.66, 0.56, 0.47].map((y, i) => (
         <mesh key={y} position={[0.14, y, 0.032]}>
           <boxGeometry args={[0.44 - i * 0.1, 0.035, 0.01]} />
@@ -312,10 +309,6 @@ export function Person({
 
 /** Складной стол с ноутбуком — «офис» на стройке (уровень 1 референса). */
 function FieldDesk({ position, rot = 0, active = false }: { position: [number, number, number]; rot?: number; active?: boolean }) {
-  const screen = useRef<THREE.MeshStandardMaterial>(null);
-  useFrame((s) => {
-    if (screen.current) screen.current.emissiveIntensity = active ? 0.75 + Math.sin(s.clock.elapsedTime * 3) * 0.2 : 0.35;
-  });
   return (
     <group position={position} rotation={[0, rot, 0]}>
       <mesh castShadow receiveShadow position={[0, 0.34, 0]}>
@@ -344,7 +337,7 @@ function FieldDesk({ position, rot = 0, active = false }: { position: [number, n
       </mesh>
       <mesh position={[0, 0.442, -0.052]} rotation={[-0.32, 0, 0]}>
         <boxGeometry args={[0.23, 0.135, 0.005]} />
-        <meshStandardMaterial ref={screen} color="#9fd8ff" emissive="#3ba7ff" emissiveIntensity={0.4} roughness={0.25} />
+        <meshStandardMaterial color="#9fd8ff" emissive="#3ba7ff" emissiveIntensity={active ? 0.75 : 0.4} roughness={0.25} />
       </mesh>
       {/* стаканчик кофе рядом */}
       <mesh castShadow position={[0.24, 0.395, 0.08]}>
@@ -355,12 +348,8 @@ function FieldDesk({ position, rot = 0, active = false }: { position: [number, n
   );
 }
 
-/** Флагшток с фирменным флагом — качается на ветру. */
-function FlagPole({ position, h = 1.1, active = false }: { position: [number, number, number]; h?: number; active?: boolean }) {
-  const flag = useRef<THREE.Group>(null);
-  useFrame((s) => {
-    if (flag.current) flag.current.rotation.y = Math.sin(s.clock.elapsedTime * (active ? 2.2 : 1.1)) * 0.22;
-  });
+/** Флагшток с фирменным флагом. */
+function FlagPole({ position, h = 1.1 }: { position: [number, number, number]; h?: number }) {
   return (
     <group position={position}>
       <mesh castShadow position={[0, 0.045, 0]}>
@@ -375,12 +364,12 @@ function FlagPole({ position, h = 1.1, active = false }: { position: [number, nu
         <sphereGeometry args={[0.035, 10, 8]} />
         <meshStandardMaterial color={GOLD} metalness={0.6} roughness={0.3} />
       </mesh>
-      <group ref={flag} position={[0, h - 0.06, 0]}>
+      <group position={[0, h - 0.06, 0]} rotation={[0, 0.18, 0]}>
         <mesh castShadow position={[0.19, 0, 0]}>
           <boxGeometry args={[0.36, 0.24, 0.01]} />
           <meshStandardMaterial color="#26364e" roughness={0.85} side={THREE.DoubleSide} />
         </mesh>
-        <Logo position={[0.19, 0, 0.012]} r={0.085} active={active} flat />
+        <Logo position={[0.19, 0, 0.012]} r={0.085} flat />
       </group>
     </group>
   );
@@ -572,10 +561,6 @@ function Lamp({ position, rot = 0 }: { position: [number, number, number]; rot?:
 
 /** Кофейный киоск у входа — уличная жизнь квартала. */
 function CoffeeKiosk({ position, rot = 0, active = false, s = 1 }: { position: [number, number, number]; rot?: number; active?: boolean; s?: number }) {
-  const sign = useRef<THREE.MeshStandardMaterial>(null);
-  useFrame((s) => {
-    if (sign.current) sign.current.emissiveIntensity = active ? 0.9 + Math.sin(s.clock.elapsedTime * 2.5) * 0.25 : 0.4;
-  });
   return (
     <group position={position} rotation={[0, rot, 0]} scale={s}>
       <mesh castShadow receiveShadow position={[0, 0.26, 0]}>
@@ -585,7 +570,7 @@ function CoffeeKiosk({ position, rot = 0, active = false, s = 1 }: { position: [
       {/* окно выдачи */}
       <mesh position={[0, 0.36, 0.212]}>
         <boxGeometry args={[0.36, 0.22, 0.02]} />
-        <meshStandardMaterial ref={sign} color="#ffd7a0" emissive="#ff9d3a" emissiveIntensity={0.5} roughness={0.4} />
+        <meshStandardMaterial color="#ffd7a0" emissive="#ff9d3a" emissiveIntensity={active ? 0.9 : 0.5} roughness={0.4} />
       </mesh>
       {/* прилавок и навес */}
       <mesh castShadow position={[0, 0.24, 0.28]}>
@@ -792,10 +777,6 @@ function Podium({ position, w, d, h = 0.5, active = false }: { position: [number
 
 /** Техника на крыше: блоки вентиляции и антенна с огоньком. */
 function RoofKit({ position, active = false }: { position: [number, number, number]; active?: boolean }) {
-  const light = useRef<THREE.MeshStandardMaterial>(null);
-  useFrame((s) => {
-    if (light.current) light.current.emissiveIntensity = 0.6 + Math.abs(Math.sin(s.clock.elapsedTime * (active ? 3 : 1.4))) * 1.4;
-  });
   return (
     <group position={position}>
       <mesh castShadow position={[-0.16, 0.06, -0.08]}>
@@ -812,21 +793,14 @@ function RoofKit({ position, active = false }: { position: [number, number, numb
       </mesh>
       <mesh position={[0.2, 0.45, -0.12]}>
         <sphereGeometry args={[0.028, 10, 8]} />
-        <meshStandardMaterial ref={light} color="#ff8f7a" emissive="#ff3b2f" emissiveIntensity={0.8} roughness={0.4} />
+        <meshStandardMaterial color="#ff8f7a" emissive="#ff3b2f" emissiveIntensity={active ? 1.4 : 0.8} roughness={0.4} />
       </mesh>
     </group>
   );
 }
 
-/** Медиаэкран на фасаде — по нему бегут «строки» данных. */
+/** Медиаэкран на фасаде — со «строками» данных. */
 function MediaScreen({ position, w = 0.6, h = 0.36, rotY = 0, active = false }: { position: [number, number, number]; w?: number; h?: number; rotY?: number; active?: boolean }) {
-  const mat = useRef<THREE.MeshStandardMaterial>(null);
-  const bars = useRef<THREE.Group>(null);
-  useFrame((s) => {
-    const t = s.clock.elapsedTime;
-    if (mat.current) mat.current.emissiveIntensity = (active ? 1.1 : 0.6) + Math.sin(t * 3) * 0.2;
-    if (bars.current) bars.current.position.y = ((t * (active ? 0.28 : 0.1)) % (h * 0.5)) - h * 0.25;
-  });
   return (
     <group position={position} rotation={[0, rotY, 0]}>
       <mesh position={[0, 0, -0.012]}>
@@ -835,9 +809,9 @@ function MediaScreen({ position, w = 0.6, h = 0.36, rotY = 0, active = false }: 
       </mesh>
       <mesh>
         <boxGeometry args={[w, h, 0.02]} />
-        <meshStandardMaterial ref={mat} color="#7fd0ff" emissive="#2ea3ff" emissiveIntensity={0.8} roughness={0.25} />
+        <meshStandardMaterial color="#7fd0ff" emissive="#2ea3ff" emissiveIntensity={active ? 1.1 : 0.8} roughness={0.25} />
       </mesh>
-      <group ref={bars} position={[0, 0, 0.014]}>
+      <group position={[0, 0, 0.014]}>
         {[-0.18, -0.06, 0.06, 0.18].map((y, i) => (
           <mesh key={y} position={[(i % 2 ? 0.08 : -0.06) * w, y * h, 0]}>
             <boxGeometry args={[w * (0.3 + (i % 3) * 0.16), h * 0.07, 0.008]} />
@@ -894,16 +868,7 @@ function SkyBridge({
 }
 
 /** Вертолётная площадка: круг с кольцом, буквой H и огнями по краю. */
-function Helipad({ position, r = 0.42, active = false }: { position: [number, number, number]; r?: number; active?: boolean }) {
-  const lights = useRef<THREE.Group>(null);
-  useFrame((s) => {
-    if (!lights.current) return;
-    const t = s.clock.elapsedTime * (active ? 3 : 1);
-    lights.current.children.forEach((c, i) => {
-      const m = (c as THREE.Mesh).material as THREE.MeshStandardMaterial;
-      m.emissiveIntensity = 0.5 + Math.max(0, Math.sin(t - i * 0.6)) * 1.6;
-    });
-  });
+function Helipad({ position, r = 0.42 }: { position: [number, number, number]; r?: number }) {
   return (
     <group position={position}>
       <mesh receiveShadow position={[0, 0.015, 0]}>
@@ -925,7 +890,7 @@ function Helipad({ position, r = 0.42, active = false }: { position: [number, nu
         <boxGeometry args={[r * 0.34, 0.006, r * 0.1]} />
         <meshStandardMaterial color={MARK} roughness={0.9} />
       </mesh>
-      <group ref={lights}>
+      <group>
         {Array.from({ length: 6 }, (_, i) => {
           const a = (i / 6) * Math.PI * 2;
           return (
@@ -943,10 +908,8 @@ function Helipad({ position, r = 0.42, active = false }: { position: [number, nu
 /** Вертолёт: винт раскручивается, когда корпорация работает. */
 function Helicopter({ position, rot = 0, active = false }: { position: [number, number, number]; rot?: number; active?: boolean }) {
   const rotor = useRef<THREE.Group>(null);
-  const tail = useRef<THREE.Group>(null);
   useFrame((_, dt) => {
     if (rotor.current) rotor.current.rotation.y += dt * (active ? 16 : 1.2);
-    if (tail.current) tail.current.rotation.x += dt * (active ? 20 : 1.6);
   });
   return (
     <group position={position} rotation={[0, rot, 0]} scale={0.78}>
@@ -968,7 +931,7 @@ function Helicopter({ position, rot = 0, active = false }: { position: [number, 
         <boxGeometry args={[0.05, 0.2, 0.14]} />
         <meshStandardMaterial color="#cfd6dd" metalness={0.3} roughness={0.55} />
       </mesh>
-      <group ref={tail} position={[0.05, 0.33, -0.66]}>
+      <group position={[0.05, 0.33, -0.66]}>
         {[0, 1].map((i) => (
           <mesh key={i} rotation={[0, 0, (i * Math.PI) / 2]}>
             <boxGeometry args={[0.02, 0.22, 0.02]} />
@@ -981,7 +944,7 @@ function Helicopter({ position, rot = 0, active = false }: { position: [number, 
         <cylinderGeometry args={[0.03, 0.035, 0.1, 8]} />
         <meshStandardMaterial color={STEEL_D} metalness={0.5} roughness={0.45} />
       </mesh>
-      <group ref={rotor} position={[0, 0.46, 0.04]}>
+      <group ref={rotor} userData={LIVE} position={[0, 0.46, 0.04]}>
         {[0, 1].map((i) => (
           <mesh key={i} rotation={[0, (i * Math.PI) / 2, 0]}>
             <boxGeometry args={[1.06, 0.014, 0.07]} />
@@ -1013,78 +976,8 @@ function Helicopter({ position, rot = 0, active = false }: { position: [number, 
   );
 }
 
-/** Дрон-квадрокоптер: летает по кругу над кварталом, винты крутятся. */
-function Drone({
-  radius = 1.2,
-  y = 1.4,
-  phase = 0,
-  speed = 0.5,
-  active = false,
-}: {
-  radius?: number;
-  y?: number;
-  phase?: number;
-  speed?: number;
-  active?: boolean;
-}) {
-  const body = useRef<THREE.Group>(null);
-  const props = useRef<THREE.Group>(null);
-  useFrame((s, dt) => {
-    const t = s.clock.elapsedTime * speed * (active ? 1.8 : 0.7) + phase;
-    if (body.current) {
-      body.current.position.set(Math.cos(t) * radius, y + Math.sin(t * 1.7) * 0.09, Math.sin(t) * radius);
-      body.current.rotation.y = -t + Math.PI / 2;
-    }
-    if (props.current) props.current.rotation.y += dt * (active ? 34 : 14);
-  });
-  return (
-    <group ref={body}>
-      <mesh castShadow>
-        <boxGeometry args={[0.11, 0.05, 0.15]} />
-        <meshStandardMaterial color="#3b434e" metalness={0.4} roughness={0.5} />
-      </mesh>
-      <mesh position={[0, -0.03, 0.02]}>
-        <sphereGeometry args={[0.03, 8, 8]} />
-        <meshStandardMaterial color="#7fd0ff" emissive="#2ea3ff" emissiveIntensity={1.2} roughness={0.3} />
-      </mesh>
-      <group ref={props}>
-        {[
-          [-0.11, -0.11],
-          [0.11, -0.11],
-          [-0.11, 0.11],
-          [0.11, 0.11],
-        ].map(([x, z], i) => (
-          <group key={i} position={[x, 0.015, z]}>
-            <mesh>
-              <cylinderGeometry args={[0.012, 0.012, 0.03, 6]} />
-              <meshStandardMaterial color="#5a6069" metalness={0.4} roughness={0.5} />
-            </mesh>
-            <mesh position={[0, 0.02, 0]}>
-              <boxGeometry args={[0.16, 0.006, 0.02]} />
-              <meshStandardMaterial color="#aeb6bf" metalness={0.3} roughness={0.6} transparent opacity={0.8} />
-            </mesh>
-            {/* луч до корпуса */}
-            <mesh position={[-x * 0.5, 0, -z * 0.5]} rotation={[0, Math.atan2(x, z), 0]}>
-              <boxGeometry args={[0.016, 0.012, 0.12]} />
-              <meshStandardMaterial color="#3b434e" metalness={0.4} roughness={0.5} />
-            </mesh>
-          </group>
-        ))}
-      </group>
-    </group>
-  );
-}
-
 /** Фонтан на площади: восьмигранная чаша, струи бьют выше, когда идёт работа. */
 function Fountain({ position, active = false }: { position: [number, number, number]; active?: boolean }) {
-  const jets = useRef<THREE.Group>(null);
-  useFrame((s) => {
-    if (!jets.current) return;
-    const t = s.clock.elapsedTime;
-    jets.current.children.forEach((c, i) => {
-      c.scale.y = (active ? 1 : 0.6) + Math.sin(t * 2.6 + i * 1.1) * (active ? 0.22 : 0.1);
-    });
-  });
   return (
     <group position={position}>
       {/* чаша */}
@@ -1101,7 +994,7 @@ function Fountain({ position, active = false }: { position: [number, number, num
         <cylinderGeometry args={[0.08, 0.11, 0.16, 8]} />
         <meshStandardMaterial color="#eef1f4" roughness={0.9} />
       </mesh>
-      <group ref={jets}>
+      <group scale={[1, active ? 1 : 0.6, 1]}>
         <mesh position={[0, 0.42, 0]}>
           <coneGeometry args={[0.05, 0.34, 8]} />
           <meshStandardMaterial color="#cfeffa" emissive="#7fd6ea" emissiveIntensity={0.6} transparent opacity={0.85} roughness={0.1} />
@@ -1178,8 +1071,8 @@ function Spire({ position, active = false }: { position: [number, number, number
         </group>
       ))}
       {/* часы-шестерни на верхнем ярусе — как на референсе, парой */}
-      <Logo position={[-0.14, 2.6, 0.28]} r={0.17} active={active} color={GOLD} />
-      <Logo position={[0.15, 2.7, 0.28]} r={0.13} active={active} color={GOLD_L} />
+      <Logo position={[-0.14, 2.6, 0.28]} r={0.17} color={GOLD} />
+      <Logo position={[0.15, 2.7, 0.28]} r={0.13} color={GOLD_L} />
       {/* корона: четыре контрфорса у основания шпиля */}
       {[
         [-1, -1],
@@ -1274,7 +1167,7 @@ export function Corp3D({ level, active = false }: { level: number; active?: bool
             <Pile position={[-1.05, 0, 0.12]} r={0.3} h={0.3} color="#6d5c46" />
             <PipeStack position={[0.78, 0, -0.36]} rot={0.35} />
             <Boards position={[0.92, 0, 0.52]} rot={-0.5} />
-            <SiteSign position={[-0.42, 0, 0.98]} rot={0.25} active={active} />
+            <SiteSign position={[-0.42, 0, 0.98]} rot={0.25} />
             <Person s={0.9} position={[0.34, 0, 1.02]} rot={-2.2} suit="#4a5568" helmet="#f2b13c" vest />
             <Boxes position={[-1.14, 0, 0.82]} rot={0.6} />
           </group>
@@ -1284,7 +1177,7 @@ export function Corp3D({ level, active = false }: { level: number; active?: bool
         {lvl === 1 && (
           <group>
             <Trailer position={[-0.2, 0, -0.62]} rot={0.06} lit={active} />
-            <FlagPole position={[0.95, 0, -0.95]} h={1.16} active={active} />
+            <FlagPole position={[0.95, 0, -0.95]} h={1.16} />
             <FieldDesk position={[-0.62, 0, 0.72]} rot={0.5} active={active} />
             <Boxes position={[0.62, 0, 0.82]} rot={-0.3} />
             <Person s={0.9} position={[0.16, 0, 0.5]} rot={-1.9} suit="#48566b" helmet="#f2b13c" vest />
@@ -1341,7 +1234,7 @@ export function Corp3D({ level, active = false }: { level: number; active?: bool
           <group>
             <Podium position={[-0.32, 0, FRONT_Z - 0.4]} w={1.44} d={1.06} h={0.52} active={active} />
             <Slab position={[-0.32, 0.58, FRONT_Z - 0.52]} w={1.06} d={0.92} floors={7} floorH={0.32} seed={4} />
-            <Logo position={[-0.32, 1.72, FRONT_Z - 0.04]} r={0.32} active={active} />
+            <Logo position={[-0.32, 1.72, FRONT_Z - 0.04]} r={0.32} />
             <Canopy position={[-0.32, 0, FRONT_Z + 0.2]} w={0.8} d={0.34} h={0.46} />
             <Entrance position={[-0.32, 0, FRONT_Z + 0.14]} w={0.56} h={0.42} active={active} />
             <RoofKit position={[-0.32, 2.9, FRONT_Z - 0.52]} active={active} />
@@ -1362,14 +1255,14 @@ export function Corp3D({ level, active = false }: { level: number; active?: bool
           <group>
             <Podium position={[-0.56, 0, FRONT_Z - 0.42]} w={1.3} d={1.02} h={0.5} active={active} />
             <Slab position={[-0.56, 0.56, FRONT_Z - 0.54]} w={0.96} d={0.86} floors={8} floorH={0.32} seed={5} lit={lit} active={active} />
-            <Logo position={[-0.56, 1.6, FRONT_Z - 0.06]} r={0.26} active={active} />
+            <Logo position={[-0.56, 1.6, FRONT_Z - 0.06]} r={0.26} />
             <Canopy position={[-0.56, 0, FRONT_Z + 0.18]} w={0.72} d={0.32} h={0.44} />
             <Entrance position={[-0.56, 0, FRONT_Z + 0.12]} w={0.52} h={0.4} active={active} />
             <RoofKit position={[-0.56, 3.19, FRONT_Z - 0.54]} active={active} />
 
             {/* вторая башня — ниже, с вертолётной площадкой на крыше */}
             <Slab position={[1.0, 0, FRONT_Z - 0.72]} w={0.84} d={0.8} floors={5} floorH={0.32} seed={9} lit={lit} active={active} />
-            <Helipad position={[1.0, 1.71, FRONT_Z - 0.72]} r={0.34} active={active} />
+            <Helipad position={[1.0, 1.71, FRONT_Z - 0.72]} r={0.34} />
 
             <SkyBridge from={[-0.08, FRONT_Z - 0.54]} to={[0.58, FRONT_Z - 0.72]} y={1.46} w={0.26} active={active} />
             <MediaScreen position={[-0.16, 0.3, FRONT_Z + 0.11]} w={0.46} h={0.3} active={active} />
@@ -1383,8 +1276,6 @@ export function Corp3D({ level, active = false }: { level: number; active?: bool
             <Person s={0.62} position={[0.38, 0, 0.86]} rot={-1.6} suit="#46536e" />
             <Lamp position={[-1.32, 0, 0.6]} rot={1.2} />
             <Lamp position={[0.06, 0, 1.3]} rot={-0.5} />
-            <Drone radius={1.35} y={2.1} phase={0} speed={0.5} active={active} />
-            <Drone radius={1.05} y={2.5} phase={2.4} speed={0.42} active={active} />
             {active && <pointLight position={[-0.4, 1.6, 0.8]} color="#ffd08a" intensity={0.9} distance={3.4} decay={2} />}
           </group>
         )}
@@ -1412,7 +1303,7 @@ export function Corp3D({ level, active = false }: { level: number; active?: bool
               lit
               active={active}
             />
-            <Helipad position={[-1.24, 1.72, FRONT_Z - 0.5]} r={0.34} active={active} />
+            <Helipad position={[-1.24, 1.72, FRONT_Z - 0.5]} r={0.34} />
             <Helicopter position={[-1.24, 1.76, FRONT_Z - 0.5]} rot={0.5} active={active} />
 
             <Slab
@@ -1426,7 +1317,7 @@ export function Corp3D({ level, active = false }: { level: number; active?: bool
               lit
               active={active}
             />
-            <Helipad position={[1.26, 2.04, FRONT_Z - 0.72]} r={0.32} active={active} />
+            <Helipad position={[1.26, 2.04, FRONT_Z - 0.72]} r={0.32} />
             <Helicopter position={[1.26, 2.08, FRONT_Z - 0.72]} rot={-0.9} active={active} />
 
             {/* переходы от шпиля к крыльям */}
@@ -1446,9 +1337,6 @@ export function Corp3D({ level, active = false }: { level: number; active?: bool
             <CrystalSpike position={[-1.34, 0, 0.92]} s={0.66} />
             <CrystalSpike position={[1.42, 0, -0.1]} s={0.56} />
             <CrystalSpike position={[0.0, 0, 1.32]} s={0.48} />
-            <Drone radius={1.5} y={2.3} phase={0} speed={0.46} active={active} />
-            <Drone radius={1.15} y={2.9} phase={2.1} speed={0.4} active={active} />
-            <Drone radius={1.7} y={1.7} phase={4.2} speed={0.34} active={active} />
             {active && <pointLight position={[0, 2.2, 0.9]} color="#ffd58a" intensity={1.1} distance={4.2} decay={2} />}
           </group>
         )}
