@@ -166,3 +166,13 @@ export function LogoutIcon({ className = 'h-5 w-5' }: IconProps) {
     </svg>
   );
 }
+
+/** Аккаунт: в Telegram на месте «выйти» стоит именно он (см. App.tsx). */
+export function UserIcon({ className = 'h-5 w-5' }: IconProps) {
+  return (
+    <svg {...base} className={className} aria-hidden="true">
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5 20c0-3.3 3.1-5.5 7-5.5s7 2.2 7 5.5" />
+    </svg>
+  );
+}

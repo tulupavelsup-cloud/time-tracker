@@ -11,11 +11,12 @@ import { useEffect, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { AnimatePresence, motion } from 'framer-motion';
 import { IS_DEMO, getUser, onAuthStateChange, signOut } from './api';
-import { signInWithTelegram } from './api/telegramAuth';
+import { isTelegramOnlyAccount, signInWithTelegram } from './api/telegramAuth';
 import { isSupabaseConfigured } from './lib/supabase';
 import { IS_TMA, tgUserName } from './lib/telegram';
 import { NotConfigured } from './screens/NotConfigured';
 import { LoginScreen } from './screens/Login';
+import { TelegramAccountScreen } from './screens/TelegramAccount';
 import { MapScreen } from './screens/Map';
 import { StatsScreen } from './screens/Stats';
 import { CategoriesScreen } from './screens/Categories';
@@ -27,6 +28,7 @@ import {
   FolderIcon,
   LogoutIcon,
   MapIcon,
+  UserIcon,
 } from './ui/Icons';
 
 export type Tab = 'home' | 'stats' | 'categories';
@@ -44,7 +46,7 @@ function initialTab(): Tab {
   return TABS.some((x) => x.id === t) ? (t as Tab) : 'home';
 }
 
-function Shell({ user }: { user: User }) {
+function Shell({ user, onAccount }: { user: User; onAccount: () => void }) {
   const { toast } = useToast();
   const [tab, setTab] = useState<Tab>(initialTab);
   // Внутри шахты (Map.tsx) интерфейс уходит: остаётся только 3D и тонкий слой
@@ -90,9 +92,10 @@ function Shell({ user }: { user: User }) {
           загораживал подписи станций, а внизу справа свободно. Только на карте:
           на «Статистике» и «Категориях» плавающая кнопка легла бы поверх строк
           списка и перехватывала бы тапы по их иконкам.
-          В Telegram кнопки нет вовсе: вход там по подписи Telegram, и «выход»
-          означал бы мгновенный вход обратно — то есть ничего. */}
-      {tab === 'home' && !IS_TMA && (
+          В Telegram на этом же месте — «аккаунт»: выходить там некуда (вход по
+          подписи Telegram, и «выход» означал бы мгновенный вход обратно), а вот
+          сказать «я уже вёл трекер вот под этой почтой» бывает нужно. */}
+      {tab === 'home' && (
         <motion.div
           className="pointer-events-none fixed inset-x-0 z-30 mx-auto w-full max-w-[430px] px-4"
           animate={{ opacity: immersed ? 0 : 1, y: immersed ? 90 : 0 }}
@@ -103,12 +106,12 @@ function Shell({ user }: { user: User }) {
             <motion.button
               type="button"
               whileTap={{ scale: 0.88 }}
-              onClick={() => void handleSignOut()}
-              aria-label="Выйти из аккаунта"
+              onClick={() => (IS_TMA ? onAccount() : void handleSignOut())}
+              aria-label={IS_TMA ? 'Мой аккаунт' : 'Выйти из аккаунта'}
               className="glass-dark pointer-events-auto flex h-10 w-10 items-center justify-center !rounded-2xl text-white/70"
               style={{ pointerEvents: immersed ? 'none' : 'auto' }}
             >
-              <LogoutIcon />
+              {IS_TMA ? <UserIcon /> : <LogoutIcon />}
             </motion.button>
           </div>
         </motion.div>
@@ -176,11 +179,23 @@ function Shell({ user }: { user: User }) {
   );
 }
 
+/**
+ * «Меня всё устраивает, я тут впервые» — отметка, что человек уже видел
+ * предложение привязать свой аккаунт и отказался. Спрашивать второй раз при
+ * каждом запуске нельзя: это назойливо. Кнопка «аккаунт» на карте остаётся.
+ */
+const SOLO_KEY = 'tt-telegram-solo';
+
 function AuthGate() {
   // undefined = ещё проверяем сессию
   const [user, setUser] = useState<User | null | undefined>(undefined);
   // внутри Telegram войти можно только по его подписи — если не вышло, сказать
   const [tgError, setTgError] = useState<string | null>(null);
+  // экран аккаунта, открытый кнопкой на карте
+  const [account, setAccount] = useState(false);
+  const [solo, setSolo] = useState(
+    () => typeof window !== 'undefined' && window.localStorage.getItem(SOLO_KEY) === '1',
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -247,7 +262,34 @@ function AuthGate() {
     );
   }
   if (user === null) return <LoginScreen />;
-  return <Shell user={user} />;
+
+  /**
+   * Первый заход из Telegram: аккаунт служебный и пустой, а часы человека
+   * лежат в том, что он завёл на сайте. Пока не спросишь — не узнаешь, поэтому
+   * спрашиваем сразу, до карты: один раз почта с паролем — и Telegram
+   * навсегда открывает нужный аккаунт (см. screens/TelegramAccount).
+   */
+  const needsAccount = IS_TMA && !IS_DEMO && isTelegramOnlyAccount(user) && !solo;
+  if (account || needsAccount) {
+    return (
+      <TelegramAccountScreen
+        user={user}
+        // после удачной привязки аккаунт уже не служебный — экран не вернётся
+        onDone={() => setAccount(false)}
+        onSkip={
+          needsAccount
+            ? () => {
+                window.localStorage.setItem(SOLO_KEY, '1');
+                setSolo(true);
+                setAccount(false);
+              }
+            : undefined
+        }
+      />
+    );
+  }
+
+  return <Shell user={user} onAccount={() => setAccount(true)} />;
 }
 
 function App() {

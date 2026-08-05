@@ -30,7 +30,15 @@ const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 
-/** Кнопка, открывающая Mini App прямо в Telegram. */
+/**
+ * Кнопка, открывающая Mini App прямо в Telegram.
+ *
+ * Адрес берётся из APP_URL целиком, вместе с «?v=N» на конце: Telegram кэширует
+ * страницу по URL и держит её долго, а кнопки «обновить» у человека нет — после
+ * выкатки он может неделю открывать старую сборку. Смена цифры делает адрес
+ * новым, и webview тянет страницу заново. Поднимать при выкатке, которую важно
+ * донести сразу (см. docs/TELEGRAM.md).
+ */
 async function openButton() {
   const url = (await secret('APP_URL')) || 'https://time-tracker-7ux.pages.dev';
   return { inline_keyboard: [[{ text: '🗺 Открыть трекер', web_app: { url } }]] };
