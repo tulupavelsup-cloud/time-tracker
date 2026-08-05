@@ -14,7 +14,9 @@
  */
 
 import { memo, useMemo } from 'react';
+import { useThree } from '@react-three/fiber';
 import * as THREE from 'three';
+import { CULL_OFF, mapFrustum } from './mapCamera';
 import {
   Bench,
   BushField,
@@ -457,6 +459,30 @@ export const Terrain = memo(function Terrain() {
   }, [blocked]);
 
   /**
+   * Дальний лес за краями кадра не рисуем совсем.
+   *
+   * Камера карты статична и известна заранее (см. mapCamera.ts), а объектив у
+   * неё длинный: по горизонтали в кадр попадает узкий клин градусов в двадцать.
+   * Всё, что вне этого клина, зритель не увидит НИКОГДА — а дальний лес это
+   * три четверти всех треугольников карты. Отсеивать можно только его: он и так
+   * помечен castShadow={false}, то есть тени в кадр не отбрасывает. Ближний лес
+   * (внутри SHADOW_R) остаётся весь — его тени в кадре видно.
+   *
+   * Запас щедрый: пирамида расширена на 10° и у каждого дерева свой радиус —
+   * лучше нарисовать лишнее, чем поймать проплешину у кромки кадра.
+   */
+  const size = useThree((s) => s.size);
+  const distant = useMemo(() => {
+    const f = mapFrustum(size.width / Math.max(1, size.height), size.width, 10);
+    const inFrame = (t: TreeSpec) => {
+      const k = t.scale ?? 1;
+      return f.intersectsSphere(new THREE.Sphere(new THREE.Vector3(t.x, 1.4 * k, t.z), 1.6 * k + 2));
+    };
+    if (CULL_OFF) return { conifers: forest.conifers.far, trees: forest.trees.far };
+    return { conifers: forest.conifers.far.filter(inFrame), trees: forest.trees.far.filter(inFrame) };
+  }, [forest, size.width, size.height]);
+
+  /**
    * Кулисы переднего плана — деревья у самой нижней кромки кадра, как на
    * референсе: они закрывают нижние углы и дают глубину.
    *
@@ -826,9 +852,9 @@ export const Terrain = memo(function Terrain() {
         с ними и разрешение отрисовки (см. AdaptiveQuality).
       */}
       <ConiferField items={forest.conifers.near.concat(foreground, inTown)} />
-      <ConiferField items={forest.conifers.far} castShadow={false} />
+      <ConiferField items={distant.conifers} castShadow={false} />
       <TreeField items={forest.trees.near} />
-      <TreeField items={forest.trees.far} castShadow={false} />
+      <TreeField items={distant.trees} castShadow={false} />
       <BushField items={forest.bushes.concat(decor.bushItems)} />
 
       {/* Кварталы домиков — то, что делает карту городом */}

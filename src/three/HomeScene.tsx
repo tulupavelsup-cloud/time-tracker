@@ -14,11 +14,12 @@
  * сцена сменяется на её интерьер в том же Canvas. Интерфейс приложения плавает
  * стеклом поверх (см. Map.tsx).
  *
- * Цена кадра. Станции, ратуша и пустыри СПЕКАЮТСЯ: их неподвижные детали
- * склеиваются в несколько кусков вместо сотни отдельных (см. Baked.tsx). На
- * каждой станции при этом движется ровно одна вещь — вагонетки, крылья
+ * Цена кадра. Станции, ратуша, пустыри и интерьеры СПЕКАЮТСЯ: их неподвижные
+ * детали склеиваются в несколько кусков вместо сотни отдельных (см. Baked.tsx).
+ * На каждой станции при этом движется ровно одна вещь — вагонетки, крылья
  * мельницы, качалка и так далее; остальное на запуск таймера отзывается
- * неподвижно. Вместе это 365 поручений видеочипу за кадр вместо 1716.
+ * неподвижно. Вместе это 365 поручений видеочипу за кадр вместо 1716 на карте и
+ * вдвое меньше прежнего внутри зон.
  *
  * Плавность. Пока идёт таймер, экран карты пересчитывает время раз в секунду —
  * и каждый такой тик прогонял бы через React всю сцену целиком (замерено: 14–22
@@ -55,7 +56,9 @@ import { StationSign } from './Props3D';
 import { Character3D } from './Character3D';
 import { TownHall } from './TownHall';
 import { CityPavement, VacantLot } from './City';
-import { CITY_AZIM, CITY_HALF_F, CITY_HALF_U, CITY_SLOTS, spot, TOWN_CENTER } from './cityLayout';
+import { CITY_SLOTS, TOWN_CENTER } from './cityLayout';
+import { CAM_FOV, fitFrame, FRAME_FOCUS } from './mapCamera';
+import { refreshShadows, ShadowFreeze } from './shadowFreeze';
 import { SAND } from './worldPalette';
 
 /** Что показываем: карту, нырок в зону, её интерьер или подъём наружу. */
@@ -127,76 +130,6 @@ const ZONE_3D: Record<
     portal: [0.4, 0.5, 0.55],
   },
 };
-
-/**
- * Половина габарита самой крупной станции на земле: площадка зоны (радиус 1.72
- * до масштаба) у банка плюс кромка вытоптанной земли. Кадр камеры считается с
- * этим запасом — иначе край площадки крайней зоны срезало бы бортиком экрана.
- */
-const STATION_HALF = 1.72 * 0.94 + 0.3;
-
-const DEG = Math.PI / 180;
-/**
- * Обзорный кадр: наклон, поворот и угол зрения камеры карты.
- *
- * Ракурс снят с референса: наклон ПОЛОГИЙ (по круглым площадкам зон видно, что
- * их эллипс сплюснут примерно вдвое — это ≈35° над землёй, а не 46°, как было),
- * а объектив ДЛИННЫЙ. Узкий угол зрения при большом отдалении — это и есть
- * «диорама»: перспектива почти не заваливает дома у краёв кадра, зато видно
- * фасады, а не крыши сверху.
- */
-const CAM_FOV = 34;
-const CAM_ELEV = 35 * DEG;
-const CAM_AZIM = CITY_AZIM;
-/** Доля высоты экрана, отданная городу (сверху сводка, снизу таб-бар). */
-const WORLD_BAND = 0.74;
-
-/**
- * Куда целится камера — точка чуть ДАЛЬШЕ центра города по глубине кадра.
- * Город от этого съезжает вниз к середине экрана: если целиться ровно в
- * площадь, снизу остаётся широкая пустая полоса луга, а сверху город почти
- * упирается в сводку.
- */
-const FRAME_SHIFT_F = -1.4;
-const FRAME_FOCUS: [number, number] = (() => {
-  const [dx, dz] = spot(0, FRAME_SHIFT_F);
-  return [TOWN_CENTER[0] + dx, TOWN_CENTER[1] + dz];
-})();
-
-/**
- * Кадр статичной карты. Считается по НЕИЗМЕННЫМ габаритам города, а не по
- * набору категорий: карта больше не ездит, и кадр не должен прыгать от того,
- * сколько станций у человека сегодня. Отступы:
- *   • по ширине — половина станции плюс её подпись (подпись рисуется постоянным
- *     размером в пикселях, у крайней станции её обрезало краем экрана);
- *   • по глубине — модель ратуши и высокие станции, которые уходят вверх.
- */
-function fitFrame(aspect: number, widthPx: number) {
-  /**
-   * Запас по ширине считается В ПИКСЕЛЯХ, а не в юнитах мира: подпись станции
-   * рисуется постоянным размером на экране, поэтому на узком телефоне она
-   * съедает заметно бо́льшую долю кадра, чем на планшете. Фиксированный запас
-   * либо резал подпись крайней станции о край экрана (на 430 px), либо зря
-   * отодвигал камеру (на широком).
-   */
-  const LABEL_HALF_PX = 58;
-  const k = Math.min(0.4, LABEL_HALF_PX / Math.max(120, widthPx / 2));
-  // что шире — подпись крайней станции или сама её площадка
-  const halfW = Math.max(CITY_HALF_U / (1 - k), CITY_HALF_U + STATION_HALF);
-  const halfD = CITY_HALF_F + 1.9;
-  const tanV = Math.tan((CAM_FOV / 2) * DEG);
-  const byWidth = halfW / (tanV * Math.max(0.35, aspect));
-  const byDepth = ((halfD / WORLD_BAND) * Math.sin(CAM_ELEV)) / tanV;
-  // потолок отдаления вырос вместе с длинным объективом: при fov 34 обзорный
-  // кадр набирается с ~30 юнитов, старый предел в 40 срезал бы его на широком экране
-  const dist = Math.min(70, Math.max(9, Math.max(byWidth, byDepth)));
-  const pos: [number, number, number] = [
-    FRAME_FOCUS[0] + dist * Math.cos(CAM_ELEV) * Math.sin(CAM_AZIM),
-    dist * Math.sin(CAM_ELEV),
-    FRAME_FOCUS[1] + dist * Math.cos(CAM_ELEV) * Math.cos(CAM_AZIM),
-  ];
-  return { pos, dist };
-}
 
 /** Кадр по умолчанию — для первой отрисовки Canvas до того, как известен размер. */
 const INITIAL_FRAME = fitFrame(
@@ -380,13 +313,6 @@ function DiveRig({ active, portal }: { active: boolean; portal: [number, number,
   return null;
 }
 
-/**
- * Темп теней. Карта СТАТИЧНА: камера не двигается, мир не двигается — теневую
- * карту можно не перерисовывать каждый кадр. Живого на ней мало (персонаж,
- * вагонетки, крылья мельницы), так что раз в четыре кадра на глаз не отличить,
- * а теневой проход занимал больше половины времени отрисовки. Это и есть та
- * экономия, за счёт которой вернулись тени и мелкие детали.
- */
 /** Полное разрешение отрисовки на этом экране (Retina ограничиваем двойкой). */
 const FULL_DPR = typeof window === 'undefined' ? 1 : Math.min(window.devicePixelRatio || 1, 2);
 
@@ -411,17 +337,6 @@ function AdaptiveQuality() {
       onFallback={() => setDpr(Math.min(FULL_DPR, 1.5))}
     />
   );
-}
-
-function ShadowPacer({ every = 4 }: { every?: number }) {
-  const frame = useRef(0);
-  useFrame((state) => {
-    const shadows = state.gl.shadowMap;
-    if (shadows.autoUpdate) shadows.autoUpdate = false;
-    frame.current = (frame.current + 1) % every;
-    if (frame.current === 0) shadows.needsUpdate = true;
-  });
-  return null;
 }
 
 /** Раскладка города: какая категория на каком месте и какие места свободны. */
@@ -614,6 +529,11 @@ export function HomeScene(props: HomeSceneProps) {
   }, [totals]);
   // мир карты живёт на карте и во время нырка, интерьер — внутри и на подъёме
   const showMap = view === 'map' || view === 'dive';
+  // на входе в зону и на выходе сцена меняется целиком — тени заморожены и
+  // сами об этом не узнают (склейка дёргает их сама, но не всё в сцене спечено)
+  useEffect(() => {
+    refreshShadows();
+  }, [showMap, insideTheme, insideLevel, insideActive]);
   /**
    * Интерьер собирается один раз на уровень: внутри зоны таймер идёт ВСЕГДА, и
    * без этого каждая его секунда прогоняла через React всю сцену цеха или
@@ -621,7 +541,14 @@ export function HomeScene(props: HomeSceneProps) {
    */
   const interior = useMemo(() => {
     const Interior = ZONE_3D[insideTheme].Interior;
-    return <Interior level={insideLevel} active={insideActive} />;
+    // Интерьер спекается так же, как станции: стены, перекрытия, станки и
+    // реквизит стоят на месте, живого в зале десяток узлов (герой, тележка,
+    // краны, экраны) — они помечены userData={LIVE} и остаются как были.
+    return (
+      <Baked deps={[insideTheme, insideLevel, insideActive]}>
+        <Interior level={insideLevel} active={insideActive} />
+      </Baked>
+    );
   }, [insideTheme, insideLevel, insideActive]);
 
   return (
@@ -659,8 +586,9 @@ export function HomeScene(props: HomeSceneProps) {
         }
       }}
     >
-      {/* тени пересчитываются реже, чем кадры — общее для карты и интерьеров */}
-      <ShadowPacer />
+      {/* тени считаются не каждый кадр, а только когда меняется состав сцены —
+          общее для карты и интерьеров (см. shadowFreeze) */}
+      <ShadowFreeze />
       {/* на слабом устройстве разрешение отрисовки опускается само */}
       <AdaptiveQuality />
       <Suspense fallback={null}>

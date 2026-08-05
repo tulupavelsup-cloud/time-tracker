@@ -11,7 +11,9 @@ import { useEffect, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { AnimatePresence, motion } from 'framer-motion';
 import { IS_DEMO, getUser, onAuthStateChange, signOut } from './api';
+import { signInWithTelegram } from './api/telegramAuth';
 import { isSupabaseConfigured } from './lib/supabase';
+import { IS_TMA, tgUserName } from './lib/telegram';
 import { NotConfigured } from './screens/NotConfigured';
 import { LoginScreen } from './screens/Login';
 import { MapScreen } from './screens/Map';
@@ -64,7 +66,8 @@ function Shell({ user }: { user: User }) {
         className="relative z-20 flex items-center gap-3 px-5 pb-1 pt-4"
         animate={{ opacity: immersed ? 0 : 1, y: immersed ? -12 : 0 }}
         transition={{ duration: 0.28 }}
-        style={{ pointerEvents: immersed ? 'none' : 'auto' }}
+        // в Telegram над приложением своя шапка с «Закрыть» — под неё отступ
+        style={{ pointerEvents: immersed ? 'none' : 'auto', paddingTop: 'calc(1rem + var(--safe-top))' }}
       >
         {/* Шапка прижата ВЛЕВО и ничего не держит справа: правый верхний угол
             отдан карте — там висят подписи станций, и любая плашка над ними
@@ -78,20 +81,23 @@ function Shell({ user }: { user: User }) {
               </span>
             )}
           </div>
-          <p className="truncate text-[10px] text-white/50">{user.email}</p>
+          {/* в Telegram почты у человека может и не быть — показываем его имя */}
+          <p className="truncate text-[10px] text-white/50">{tgUserName() ?? user.email}</p>
         </div>
       </motion.header>
 
       {/* Выход — в правом нижнем углу карты, над таб-баром: наверху он
           загораживал подписи станций, а внизу справа свободно. Только на карте:
           на «Статистике» и «Категориях» плавающая кнопка легла бы поверх строк
-          списка и перехватывала бы тапы по их иконкам. */}
-      {tab === 'home' && (
+          списка и перехватывала бы тапы по их иконкам.
+          В Telegram кнопки нет вовсе: вход там по подписи Telegram, и «выход»
+          означал бы мгновенный вход обратно — то есть ничего. */}
+      {tab === 'home' && !IS_TMA && (
         <motion.div
           className="pointer-events-none fixed inset-x-0 z-30 mx-auto w-full max-w-[430px] px-4"
           animate={{ opacity: immersed ? 0 : 1, y: immersed ? 90 : 0 }}
           transition={{ duration: 0.28 }}
-          style={{ bottom: 'calc(84px + env(safe-area-inset-bottom))' }}
+          style={{ bottom: 'calc(84px + var(--safe-bottom))' }}
         >
           <div className="flex justify-end">
             <motion.button
@@ -108,7 +114,7 @@ function Shell({ user }: { user: User }) {
         </motion.div>
       )}
 
-      <main className="flex flex-1 flex-col pb-[calc(96px+env(safe-area-inset-bottom))]">
+      <main className="flex flex-1 flex-col pb-[calc(96px+var(--safe-bottom))]">
         <AnimatePresence mode="wait">
           <motion.div
             key={tab}
@@ -131,7 +137,7 @@ function Shell({ user }: { user: User }) {
         animate={{ opacity: immersed ? 0 : 1, y: immersed ? 90 : 0 }}
         transition={{ duration: 0.28 }}
         style={{
-          bottom: 'calc(10px + env(safe-area-inset-bottom))',
+          bottom: 'calc(10px + var(--safe-bottom))',
           pointerEvents: immersed ? 'none' : 'auto',
         }}
       >
@@ -173,12 +179,30 @@ function Shell({ user }: { user: User }) {
 function AuthGate() {
   // undefined = ещё проверяем сессию
   const [user, setUser] = useState<User | null | undefined>(undefined);
+  // внутри Telegram войти можно только по его подписи — если не вышло, сказать
+  const [tgError, setTgError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    void getUser().then((u) => {
-      if (!cancelled) setUser(u);
-    });
+    void getUser()
+      .then(async (u) => {
+        /**
+         * В Telegram человека уже опознали — почту и пароль спрашивать не за
+         * чем: меняем подпись Mini App на сессию Supabase (см. telegramAuth).
+         * Делаем это только когда своей сессии ещё нет: она переживает
+         * перезапуск, и лишний обмен ни к чему.
+         */
+        if (u || !IS_TMA || IS_DEMO) return u;
+        return await signInWithTelegram();
+      })
+      .then((u) => {
+        if (!cancelled) setUser(u ?? null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setTgError(errorText(err));
+        setUser(null);
+      });
     const unsubscribe = onAuthStateChange((u) => {
       if (!cancelled) setUser(u);
     });
@@ -192,7 +216,21 @@ function AuthGate() {
     return (
       <div className="relative flex min-h-dvh items-center justify-center">
         <Scene />
-        <LoadingBlock label="Проверяем вход…" />
+        <LoadingBlock label={IS_TMA ? 'Входим через Telegram…' : 'Проверяем вход…'} />
+      </div>
+    );
+  }
+  if (user === null && IS_TMA) {
+    // Своего экрана входа в Telegram нет и быть не должно: если подпись не
+    // приняли, помочь может только перезапуск приложения из бота.
+    return (
+      <div className="relative flex min-h-dvh items-center justify-center p-6">
+        <Scene />
+        <div className="glass-dark max-w-xs p-5 text-center text-sm text-white/80">
+          Не получилось войти через Telegram.
+          {tgError ? <span className="mt-2 block text-white/55">{tgError}</span> : null}
+          <span className="mt-2 block text-white/55">Закройте приложение и откройте его снова из бота.</span>
+        </div>
       </div>
     );
   }

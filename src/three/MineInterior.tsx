@@ -32,6 +32,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
+import { LIVE } from './Baked';
 import { MAX_LEVEL } from '../lib/thresholds';
 import { Character3D } from './Character3D';
 import { chain, Layer, type Placed } from './Instanced';
@@ -588,11 +589,11 @@ function ShuttleCart({ active, park, deep }: { active: boolean; park: number; de
   });
 
   return (
-    <group ref={g} position={[RAIL_X, 0.62, park]} scale={1.5}>
-      <group ref={full}>
+    <group userData={LIVE} ref={g} position={[RAIL_X, 0.62, park]} scale={1.5}>
+      <group userData={LIVE} ref={full}>
         <Cart ore />
       </group>
-      <group ref={empty} visible={false}>
+      <group userData={LIVE} ref={empty} visible={false}>
         <Cart />
       </group>
     </group>
@@ -700,7 +701,7 @@ function Conveyor({ active, x, z }: { active: boolean; x: number; z: number }) {
           <meshStandardMaterial color="#7b7f88" metalness={0.6} roughness={0.4} />
         </mesh>
       ))}
-      <group ref={boxes}>
+      <group userData={LIVE} ref={boxes}>
         {[0, 1, 2, 3].map((i) => (
           <group key={i}>
             <mesh castShadow>
@@ -739,15 +740,15 @@ function Hoist({ active, x, z }: { active: boolean; x: number; z: number }) {
       <Timber position={[0.75, 1.8, 0]} args={[0.2, 3.6, 0.2]} />
       <Timber position={[0, 3.6, 0]} args={[1.9, 0.2, 0.2]} />
       <Timber position={[-0.75, 3.3, 0]} args={[0.7, 0.14, 0.14]} rot={[0, 0, -0.6]} />
-      <mesh ref={wheel} position={[0, 3.5, 0.16]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh userData={LIVE} ref={wheel} position={[0, 3.5, 0.16]} rotation={[Math.PI / 2, 0, 0]}>
         <torusGeometry args={[0.2, 0.04, 8, 18]} />
         <meshStandardMaterial color="#7b7f88" metalness={0.6} roughness={0.4} />
       </mesh>
-      <mesh ref={rope} position={[0, 2.6, 0]}>
+      <mesh userData={LIVE} ref={rope} position={[0, 2.6, 0]}>
         <cylinderGeometry args={[0.02, 0.02, 1, 6]} />
         <meshStandardMaterial color="#c8b48a" roughness={0.9} />
       </mesh>
-      <group ref={basket} position={[0, 1.05, 0]}>
+      <group userData={LIVE} ref={basket} position={[0, 1.05, 0]}>
         <mesh castShadow>
           <boxGeometry args={[0.7, 0.42, 0.7]} />
           <meshStandardMaterial color="#8a5a33" roughness={0.9} />
@@ -833,7 +834,7 @@ function Pipes({ active, back, halfW }: { active: boolean; back: number; halfW: 
           <cylinderGeometry args={[0.045, 0.045, 0.32, 8]} />
           <meshStandardMaterial color="#6f737a" metalness={0.6} roughness={0.4} />
         </mesh>
-        <mesh ref={valve}>
+        <mesh userData={LIVE} ref={valve}>
           <torusGeometry args={[0.16, 0.032, 8, 18]} />
           <meshStandardMaterial color="#c0603c" metalness={0.4} roughness={0.5} />
         </mesh>
@@ -848,7 +849,7 @@ function Pipes({ active, back, halfW }: { active: boolean; back: number; halfW: 
           <circleGeometry args={[0.17, 16]} />
           <meshStandardMaterial color="#f2ead4" emissive="#a08a4a" emissiveIntensity={0.35} roughness={0.6} />
         </mesh>
-        <mesh ref={needle} position={[0, 0, 0.08]}>
+        <mesh userData={LIVE} ref={needle} position={[0, 0, 0.08]}>
           <boxGeometry args={[0.02, 0.14, 0.01]} />
           <meshStandardMaterial color="#b23c2c" />
         </mesh>
@@ -878,7 +879,7 @@ function Furnace({ active, x, z }: { active: boolean; x: number; z: number }) {
         <cylinderGeometry args={[0.95, 1.1, 0.24, 8]} />
         <meshStandardMaterial color="#5b5a5e" roughness={1} flatShading />
       </mesh>
-      <mesh ref={fire} castShadow position={[0, 1.55, 0]}>
+      <mesh userData={LIVE} ref={fire} castShadow position={[0, 1.55, 0]}>
         <coneGeometry args={[0.42, 1.5, 6]} />
         <meshStandardMaterial ref={glow} color="#ffb254" emissive="#ff6a12" emissiveIntensity={2} roughness={0.35} flatShading />
       </mesh>
@@ -936,7 +937,7 @@ function Heart({ x, z, s: size }: { x: number; z: number; s: number }) {
         <ringGeometry args={[1.1, 1.4, 32]} />
         <meshStandardMaterial color="#7ff0ff" emissive="#39c9e8" emissiveIntensity={1.6} side={THREE.DoubleSide} />
       </mesh>
-      <mesh castShadow position={[0, 2.1, 0]}>
+      <mesh userData={LIVE} castShadow position={[0, 2.1, 0]}>
         <coneGeometry args={[0.95, 3.4, 6]} />
         <meshStandardMaterial
           ref={core}
@@ -956,7 +957,7 @@ function Heart({ x, z, s: size }: { x: number; z: number; s: number }) {
         <coneGeometry args={[0.34, 1.4, 6]} />
         <meshStandardMaterial color="#d7f3ff" emissive="#39c9e8" emissiveIntensity={1.4} roughness={0.15} flatShading />
       </mesh>
-      <group ref={shards} position={[0, 2.2, 0]}>
+      <group userData={LIVE} ref={shards} position={[0, 2.2, 0]}>
         {Array.from({ length: 7 }, (_, i) => {
           const a = (i / 7) * Math.PI * 2;
           return (
@@ -1079,7 +1080,7 @@ function Chips({ apiRef }: { apiRef: React.MutableRefObject<{ hit: () => void; t
 
   return (
     <group>
-      <group ref={group}>
+      <group userData={LIVE} ref={group}>
         {Array.from({ length: CHIP_COUNT }, (_, i) => (
           <mesh key={i} visible={false} scale={0.07}>
             <tetrahedronGeometry args={[1, 0]} />
@@ -1088,7 +1089,7 @@ function Chips({ apiRef }: { apiRef: React.MutableRefObject<{ hit: () => void; t
         ))}
       </group>
       <pointLight ref={flash} position={[VEIN[0] + 0.4, VEIN[1], VEIN[2]]} color="#ffe6a8" intensity={0} distance={4} decay={2} />
-      <mesh ref={ore} visible={false} scale={0.16} castShadow>
+      <mesh userData={LIVE} ref={ore} visible={false} scale={0.16} castShadow>
         <icosahedronGeometry args={[1, 0]} />
         <meshStandardMaterial color="#5a5346" roughness={1} flatShading />
       </mesh>

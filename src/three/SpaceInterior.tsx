@@ -29,6 +29,7 @@
 import { useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
+import { LIVE } from './Baked';
 import { MAX_LEVEL } from '../lib/thresholds';
 import { Character3D } from './Character3D';
 import { Emblem, Rocket } from './Space3D';
@@ -515,12 +516,12 @@ function Screen({
         <boxGeometry args={[w, h, 0.035]} />
         <meshStandardMaterial color="#262c34" roughness={0.7} />
       </mesh>
-      <mesh position={[0, 0, 0.023]}>
+      <mesh userData={LIVE} position={[0, 0, 0.023]}>
         <boxGeometry args={[w - 0.045, h - 0.045, 0.008]} />
         <meshStandardMaterial ref={mat} color={color} emissive={em} emissiveIntensity={0.6} roughness={0.28} />
       </mesh>
       {/* строки телеметрии */}
-      <group ref={marks} position={[0, 0, 0.03]}>
+      <group userData={LIVE} ref={marks} position={[0, 0, 0.03]}>
         {[-1.2, -0.4, 0.4, 1.2].map((k) => (
           <mesh key={k} position={[0, k * h * 0.19, 0]}>
             <boxGeometry args={[w * 0.6, h * 0.09, 0.006]} />
@@ -564,7 +565,7 @@ function Countdown({ position, rotY = 0, active, gold = false }: { position: [nu
         <boxGeometry args={[1.58, 0.44, 0.02]} />
         <meshStandardMaterial color="#0d1620" emissive="#08202e" emissiveIntensity={0.4} roughness={0.3} />
       </mesh>
-      <group ref={digits} position={[0, 0.04, 0.03]}>
+      <group userData={LIVE} ref={digits} position={[0, 0.04, 0.03]}>
         {[0, 1, 2, 3, 4, 5].map((i) => (
           <group key={i} position={[-0.62 + i * 0.25 + (i > 3 ? 0.06 : 0) + (i > 1 ? 0.03 : 0), 0, 0]}>
             {/* семь сегментов условной цифры: три поперечных и четыре боковых */}
@@ -595,7 +596,7 @@ function Countdown({ position, rotY = 0, active, gold = false }: { position: [nu
         <boxGeometry args={[1.5, 0.07, 0.01]} />
         <meshStandardMaterial color="#1a222c" roughness={0.6} />
       </mesh>
-      <mesh ref={bar} position={[-0.72, -0.24, 0.03]}>
+      <mesh userData={LIVE} ref={bar} position={[-0.72, -0.24, 0.03]}>
         <boxGeometry args={[1.5, 0.05, 0.01]} />
         <meshStandardMaterial color={GREEN} emissive={GREEN_EM} emissiveIntensity={active ? 1.2 : 0.4} roughness={0.3} />
       </mesh>
@@ -656,7 +657,7 @@ function Sparks({ position, active }: { position: [number, number, number]; acti
   return (
     <group position={position}>
       <pointLight ref={glow} color="#cfe4ff" intensity={0} distance={2.6} decay={2} />
-      <group ref={grp}>
+      <group userData={LIVE} ref={grp}>
         {seeds.map((_, i) => (
           <mesh key={i}>
             <sphereGeometry args={[0.022, 6, 5]} />
@@ -749,7 +750,7 @@ function Bench({
           <coneGeometry args={[0.11, 0.14, 12, 1, true]} />
           <meshStandardMaterial color="#dfe4ea" metalness={0.3} roughness={0.6} side={THREE.DoubleSide} />
         </mesh>
-        <mesh position={[-0.16, 0.45, 0.08]}>
+        <mesh userData={LIVE} position={[-0.16, 0.45, 0.08]}>
           <sphereGeometry args={[0.05, 10, 8]} />
           <meshStandardMaterial ref={lamp} color="#fff2d4" emissive="#ffcf85" emissiveIntensity={0.6} roughness={0.4} />
         </mesh>
@@ -1000,7 +1001,7 @@ function Crane({ y, halfW, from, to, active }: { y: number; halfW: number; from:
           <meshStandardMaterial color={STEEL_D} metalness={0.45} roughness={0.5} />
         </mesh>
       ))}
-      <group ref={bridge}>
+      <group userData={LIVE} ref={bridge}>
         {/* мост */}
         <mesh castShadow position={[0, 0, 0]}>
           <boxGeometry args={[halfW * 2 - 0.3, 0.22, 0.2]} />
@@ -1010,16 +1011,16 @@ function Crane({ y, halfW, from, to, active }: { y: number; halfW: number; from:
           <boxGeometry args={[halfW * 2 - 0.3, 0.08, 0.32]} />
           <meshStandardMaterial color={STEEL_D} metalness={0.45} roughness={0.5} />
         </mesh>
-        <group ref={trolley}>
+        <group userData={LIVE} ref={trolley}>
           <mesh castShadow position={[0, -0.16, 0]}>
             <boxGeometry args={[0.34, 0.2, 0.3]} />
             <meshStandardMaterial color="#4a5563" metalness={0.4} roughness={0.55} />
           </mesh>
-          <mesh ref={rope} position={[0, -0.8, 0]}>
+          <mesh userData={LIVE} ref={rope} position={[0, -0.8, 0]}>
             <cylinderGeometry args={[0.012, 0.012, 1, 5]} />
             <meshStandardMaterial color="#3a424c" metalness={0.5} roughness={0.5} />
           </mesh>
-          <group ref={hook} position={[0, -1.1, 0]}>
+          <group userData={LIVE} ref={hook} position={[0, -1.1, 0]}>
             <mesh castShadow>
               <boxGeometry args={[0.14, 0.1, 0.14]} />
               <meshStandardMaterial color={STEEL} metalness={0.55} roughness={0.4} />
@@ -1066,7 +1067,7 @@ function Transporter({ active, park, deep }: { active: boolean; park: number; de
     if (wheels.current) wheels.current.rotation.x += dt * (active ? 5 : 0);
   });
   return (
-    <group ref={cart} position={[LANE_X, 0, park]}>
+    <group userData={LIVE} ref={cart} position={[LANE_X, 0, park]}>
       <mesh castShadow receiveShadow position={[0, 0.22, 0]}>
         <boxGeometry args={[0.66, 0.16, 1.0]} />
         <meshStandardMaterial color={SIGNAL} metalness={0.25} roughness={0.6} />
@@ -1080,7 +1081,7 @@ function Transporter({ active, park, deep }: { active: boolean; park: number; de
         <boxGeometry args={[0.4, 0.07, 0.02]} />
         <meshStandardMaterial color={SCREEN} emissive={SCREEN_EM} emissiveIntensity={active ? 1.1 : 0.3} roughness={0.3} />
       </mesh>
-      <group ref={wheels}>
+      <group userData={LIVE} ref={wheels}>
         {[-0.3, 0.3].map((x) =>
           [-0.32, 0, 0.32].map((z) => (
             <mesh key={`${x}:${z}`} position={[x, 0.1, z]} rotation={[0, 0, Math.PI / 2]}>
@@ -1090,7 +1091,7 @@ function Transporter({ active, park, deep }: { active: boolean; park: number; de
           )),
         )}
       </group>
-      <group ref={cargo} position={[0, 0.32, 0]}>
+      <group userData={LIVE} ref={cargo} position={[0, 0.32, 0]}>
         <Section position={[0, 0, 0]} rot={Math.PI / 2} len={0.86} r={0.24} />
       </group>
     </group>
@@ -1140,7 +1141,7 @@ function Airlock({ back, halfW, active, open = false }: { back: number; halfW: n
             <meshStandardMaterial color="#eaf4ff" emissive="#cfe6ff" emissiveIntensity={1.6} roughness={0.3} />
           </mesh>
         ))}
-      <group ref={leaves} position={[0, 1.25, 0.12]}>
+      <group userData={LIVE} ref={leaves} position={[0, 1.25, 0.12]}>
         {[-1, 1].map((sx) => (
           <mesh key={sx} castShadow position={[sx * 0.36, 0, 0]}>
             <boxGeometry args={[0.72, 2.46, 0.07]} />
@@ -1342,7 +1343,7 @@ function PadWindow({
         </mesh>
         <Rocket position={[0, 0.24, 0]} h={1.5} r={0.13} active={active} gold={gold} />
         {/* зарево двигателей на столе */}
-        <mesh position={[0, 0.16, 0.02]}>
+        <mesh userData={LIVE} position={[0, 0.16, 0.02]}>
           <sphereGeometry args={[0.26, 12, 10]} />
           <meshStandardMaterial ref={glow} color="#ffcf8a" emissive="#ff8a2a" emissiveIntensity={0.3} transparent opacity={0.75} roughness={0.3} />
         </mesh>
@@ -1387,12 +1388,12 @@ function ArmRobot({ position, rot = 0, active }: { position: [number, number, nu
         <cylinderGeometry args={[0.28, 0.32, 0.32, 14]} />
         <meshStandardMaterial color="#3f4854" roughness={0.7} metalness={0.2} />
       </mesh>
-      <group ref={shoulder} position={[0, 0.34, 0]}>
+      <group userData={LIVE} ref={shoulder} position={[0, 0.34, 0]}>
         <mesh castShadow position={[0.3, 0, 0]}>
           <boxGeometry args={[0.7, 0.16, 0.18]} />
           <meshStandardMaterial color={SIGNAL} metalness={0.35} roughness={0.5} />
         </mesh>
-        <group ref={elbow} position={[0.62, 0, 0]}>
+        <group userData={LIVE} ref={elbow} position={[0.62, 0, 0]}>
           <mesh castShadow position={[0.26, 0, 0]}>
             <boxGeometry args={[0.6, 0.13, 0.14]} />
             <meshStandardMaterial color="#dfe4ea" metalness={0.35} roughness={0.5} />
@@ -1403,7 +1404,7 @@ function ArmRobot({ position, rot = 0, active }: { position: [number, number, nu
               <boxGeometry args={[0.14, 0.16, 0.16]} />
               <meshStandardMaterial color={STEEL_D} metalness={0.5} roughness={0.45} />
             </mesh>
-            <group ref={part} position={[0.18, 0, 0]}>
+            <group userData={LIVE} ref={part} position={[0.18, 0, 0]}>
               <mesh castShadow rotation={[0, 0, Math.PI / 2]}>
                 <cylinderGeometry args={[0.13, 0.16, 0.2, 14, 1, true]} />
                 <meshStandardMaterial color={HULL} metalness={0.45} roughness={0.4} side={THREE.DoubleSide} />

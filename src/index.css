@@ -3,6 +3,22 @@
 @tailwind utilities;
 
 @layer base {
+  /**
+   * Безопасная зона. В браузере её знает система (вырез, планка жестов), а
+   * внутри Telegram — нет: там env(safe-area-inset-*) описывает ЭКРАН и ничего
+   * не знает ни про шапку Telegram сверху, ни про его планку снизу. Поэтому
+   * вёрстка спрашивает не env() напрямую, а эти переменные: в Telegram их
+   * подменяют значения из самого клиента (см. lib/telegram.ts).
+   */
+  :root {
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  html.tg {
+    --safe-top: var(--tg-top, 0px);
+    --safe-bottom: var(--tg-bottom, 0px);
+  }
+
   body {
     @apply bg-[#37884c] font-sans text-white antialiased;
   }

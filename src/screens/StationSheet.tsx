@@ -216,7 +216,7 @@ export function StationSheet({
           )}
         </div>
 
-        <div className="space-y-4 p-5 pb-[calc(20px+env(safe-area-inset-bottom))]">
+        <div className="space-y-4 p-5 pb-[calc(20px+var(--safe-bottom))]">
           {/* Заголовок */}
           <div className="flex items-center gap-3">
             <span

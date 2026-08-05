@@ -346,7 +346,7 @@ function TimeAdjustSheet({
         onClick={onClose}
       />
       <motion.div
-        className="glass-dark fixed inset-x-0 bottom-0 z-[60] mx-auto max-h-[92vh] max-w-[430px] space-y-4 overflow-y-auto !rounded-b-none !rounded-t-[28px] p-5 pb-[calc(20px+env(safe-area-inset-bottom))]"
+        className="glass-dark fixed inset-x-0 bottom-0 z-[60] mx-auto max-h-[92vh] max-w-[430px] space-y-4 overflow-y-auto !rounded-b-none !rounded-t-[28px] p-5 pb-[calc(20px+var(--safe-bottom))]"
         initial={{ y: '100%' }}
         animate={{ y: 0 }}
         exit={{ y: '100%' }}

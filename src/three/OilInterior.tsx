@@ -34,6 +34,7 @@
 import { useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
+import { LIVE } from './Baked';
 import { MAX_LEVEL } from '../lib/thresholds';
 import { Character3D } from './Character3D';
 import { chain, Layer, type Placed } from './Instanced';
@@ -502,7 +503,7 @@ function Gauge({
           </mesh>
         );
       })}
-      <group ref={hand} position={[0, 0.046, 0]} rotation={[0, 0, -2.2]}>
+      <group userData={LIVE} ref={hand} position={[0, 0.046, 0]} rotation={[0, 0, -2.2]}>
         <mesh position={[r * 0.3, 0, 0]}>
           <boxGeometry args={[r * 0.62, 0.006, 0.014]} />
           <meshStandardMaterial color="#b8342a" roughness={0.6} />
@@ -555,11 +556,11 @@ function Screen({
         <boxGeometry args={[w, h, 0.035]} />
         <meshStandardMaterial color="#2c3138" roughness={0.7} />
       </mesh>
-      <mesh position={[0, 0, 0.023]}>
+      <mesh userData={LIVE} position={[0, 0, 0.023]}>
         <boxGeometry args={[w - 0.045, h - 0.045, 0.008]} />
         <meshStandardMaterial ref={mat} color={color} emissive={em} emissiveIntensity={0.6} roughness={0.28} />
       </mesh>
-      <group ref={bars} position={[0, 0, 0.03]}>
+      <group userData={LIVE} ref={bars} position={[0, 0, 0.03]}>
         {[-1.5, -0.5, 0.5, 1.5].map((k) => (
           <mesh key={k} position={[k * w * 0.17, 0, 0]}>
             <boxGeometry args={[w * 0.1, h * 0.42, 0.006]} />
@@ -579,7 +580,7 @@ function ValveWheel({ position, rot = [0, 0, 0], r = 0.17, active, speed = 1 }: 
   });
   return (
     <group position={position} rotation={rot}>
-      <group ref={wheel}>
+      <group userData={LIVE} ref={wheel}>
         <mesh castShadow rotation={[Math.PI / 2, 0, 0]}>
           <torusGeometry args={[r, r * 0.11, 7, 18]} />
           <meshStandardMaterial color={BRASS} metalness={0.6} roughness={0.35} />
@@ -650,7 +651,7 @@ function PumpUnit({ z, active, seed = 0, gold = false }: { z: number; active: bo
       </group>
 
       {/* маховик с кривошипом */}
-      <group ref={wheel} position={[-0.02, 0.42, 0]}>
+      <group userData={LIVE} ref={wheel} position={[-0.02, 0.42, 0]}>
         <mesh castShadow rotation={[0, 0, Math.PI / 2]}>
           <cylinderGeometry args={[0.3, 0.3, 0.06, 20]} />
           <meshStandardMaterial color={metalD} metalness={0.45} roughness={0.55} />
@@ -683,7 +684,7 @@ function PumpUnit({ z, active, seed = 0, gold = false }: { z: number; active: bo
           <cylinderGeometry args={[0.19, 0.19, 0.05, 16]} />
           <meshStandardMaterial color={metalD} metalness={0.4} roughness={0.55} />
         </mesh>
-        <group ref={rodEnd}>
+        <group userData={LIVE} ref={rodEnd}>
           <mesh castShadow position={[-0.24, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
             <cylinderGeometry args={[0.032, 0.032, 0.36, 8]} />
             <meshStandardMaterial color="#e7eaee" metalness={0.7} roughness={0.2} />
@@ -771,7 +772,7 @@ function HandPump({ position, rot = 0, active }: { position: [number, number, nu
         <cylinderGeometry args={[0.09, 0.11, 0.36, 12]} />
         <meshStandardMaterial color={RUST} metalness={0.35} roughness={0.65} />
       </mesh>
-      <group ref={lever} position={[0, 0.68, 0]}>
+      <group userData={LIVE} ref={lever} position={[0, 0.68, 0]}>
         <mesh castShadow position={[0, 0.03, 0.2]}>
           <boxGeometry args={[0.05, 0.05, 0.52] as [number, number, number]} />
           <meshStandardMaterial color={STEEL} metalness={0.5} roughness={0.45} />
@@ -817,7 +818,7 @@ function KeroLamp({ position, active }: { position: [number, number, number]; ac
         <cylinderGeometry args={[0.06, 0.075, 0.2, 12, 1, true]} />
         <meshStandardMaterial color="#e8f0f2" transparent opacity={0.4} roughness={0.1} metalness={0.1} side={THREE.DoubleSide} />
       </mesh>
-      <mesh ref={flame} position={[0, 0.24, 0]}>
+      <mesh userData={LIVE} ref={flame} position={[0, 0.24, 0]}>
         <coneGeometry args={[0.028, 0.11, 8]} />
         <meshStandardMaterial color="#ffd98a" emissive="#ff9a2a" emissiveIntensity={2.2} roughness={0.3} />
       </mesh>
@@ -860,7 +861,7 @@ function DieselGen({ position, rot = 0, active }: { position: [number, number, n
         <meshStandardMaterial color={RUST_D} metalness={0.35} roughness={0.7} />
       </mesh>
       {/* маховик */}
-      <group ref={wheel} position={[0.42, 0.44, 0]}>
+      <group userData={LIVE} ref={wheel} position={[0.42, 0.44, 0]}>
         <mesh castShadow rotation={[0, 0, Math.PI / 2]}>
           <cylinderGeometry args={[0.36, 0.36, 0.07, 22]} />
           <meshStandardMaterial color={RUST_D} metalness={0.4} roughness={0.6} />
@@ -981,7 +982,7 @@ function RotaryTable({ position, deckY, active, gold = false }: { position: [num
         </mesh>
       ))}
       {/* ротор и колонна */}
-      <group ref={rotor} position={[0, 0.18, 0]}>
+      <group userData={LIVE} ref={rotor} position={[0, 0.18, 0]}>
         <mesh castShadow receiveShadow>
           <cylinderGeometry args={[0.36, 0.4, 0.16, 18]} />
           <meshStandardMaterial color={STEEL_D} metalness={0.5} roughness={0.5} />
@@ -1017,7 +1018,7 @@ function RotaryTable({ position, deckY, active, gold = false }: { position: [num
         <pointLight position={[0, -0.3, 0]} color="#cfe0ff" intensity={0.8} distance={2.6} decay={2} />
       </group>
       {/* машинный ключ на подвесе */}
-      <group ref={tongs} position={[0, 0.9, 0]}>
+      <group userData={LIVE} ref={tongs} position={[0, 0.9, 0]}>
         <mesh castShadow position={[0.5, 0, 0]}>
           <boxGeometry args={[0.6, 0.1, 0.16]} />
           <meshStandardMaterial color={RUST} metalness={0.4} roughness={0.6} />
@@ -1253,7 +1254,7 @@ function FieldWindow({
         <meshStandardMaterial color="#20293a" roughness={1} />
       </mesh>
       {/* качалки-силуэты: коромысла кивают вразнобой */}
-      <group ref={jacks}>
+      <group userData={LIVE} ref={jacks}>
         {[-0.55, 0.05, 0.6].map((k, i) => (
           <group key={k} position={[k * hw, SILL + 0.86 + i * 0.05, z + 0.07]}>
             <mesh>
@@ -1279,7 +1280,7 @@ function FieldWindow({
           <boxGeometry args={[0.055, 0.56, 0.02]} />
           <meshStandardMaterial color={silhouette} roughness={1} />
         </mesh>
-        <mesh ref={flame} position={[0, 0.68, 0.005]}>
+        <mesh userData={LIVE} ref={flame} position={[0, 0.68, 0.005]}>
           <coneGeometry args={[0.075, 0.28, 8]} />
           <meshStandardMaterial color="#ffb347" emissive="#ff6a12" emissiveIntensity={1.6} roughness={0.3} />
         </mesh>
@@ -1336,7 +1337,7 @@ function Trolley({ active, park, deep, gold = false }: { active: boolean; park: 
     if (wheels.current) wheels.current.rotation.x += dt * (active ? 5 : 0);
   });
   return (
-    <group ref={cart} position={[LANE_X, 0, park]}>
+    <group userData={LIVE} ref={cart} position={[LANE_X, 0, park]}>
       <mesh castShadow receiveShadow position={[0, 0.24, 0]}>
         <boxGeometry args={[0.62, 0.1, 0.94]} />
         <meshStandardMaterial color={RUST_D} metalness={0.3} roughness={0.65} />
@@ -1359,7 +1360,7 @@ function Trolley({ active, park, deep, gold = false }: { active: boolean; park: 
           <meshStandardMaterial color={STEEL} metalness={0.5} roughness={0.5} />
         </mesh>
       ))}
-      <group ref={wheels}>
+      <group userData={LIVE} ref={wheels}>
         {[-0.28, 0.28].map((x) =>
           [-0.34, 0.34].map((z) => (
             <mesh key={`${x}:${z}`} position={[x, 0.11, z]} rotation={[0, 0, Math.PI / 2]}>
@@ -1369,7 +1370,7 @@ function Trolley({ active, park, deep, gold = false }: { active: boolean; park: 
           )),
         )}
       </group>
-      <group ref={cargo} position={[0, 0.29, 0]}>
+      <group userData={LIVE} ref={cargo} position={[0, 0.29, 0]}>
         <Drum position={[0, 0, -0.22]} rot={0.3} color={gold ? GOLD : '#5f7a5a'} oilTop />
         <Drum position={[0, 0, 0.24]} rot={-0.4} color={gold ? GOLD_D : '#7a5a4a'} oilTop />
       </group>
@@ -1447,7 +1448,7 @@ function HeartFountain({ position, active }: { position: [number, number, number
         <meshStandardMaterial color={GOLD} metalness={0.6} roughness={0.32} />
       </mesh>
       {/* струя и капли */}
-      <group ref={jet} position={[0, 0.7, 0]}>
+      <group userData={LIVE} ref={jet} position={[0, 0.7, 0]}>
         <mesh position={[0, 0.34, 0]}>
           <cylinderGeometry args={[0.05, 0.09, 0.68, 12]} />
           <meshStandardMaterial color={OIL_L} metalness={0.88} roughness={0.14} />
@@ -1457,7 +1458,7 @@ function HeartFountain({ position, active }: { position: [number, number, number
           <meshStandardMaterial color={GOLD_D} metalness={0.85} roughness={0.16} emissive={GOLD_D} emissiveIntensity={0.25} />
         </mesh>
       </group>
-      <group ref={drops}>
+      <group userData={LIVE} ref={drops}>
         {seeds.map((_, i) => (
           <mesh key={i}>
             <sphereGeometry args={[0.035, 8, 6]} />

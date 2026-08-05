@@ -42,6 +42,7 @@ import {
 import { elapsedSeconds, formatClock, formatDuration, formatHours } from '../lib/format';
 import { categoryColor } from '../lib/palette';
 import { StationSheet } from './StationSheet';
+import { setBackButton } from '../lib/telegram';
 import { errorText, useToast } from '../ui/Toast';
 import { TimeAdjustButton } from '../ui/TimeAdjust';
 import { LoadingBlock } from '../ui/Spinner';
@@ -278,6 +279,20 @@ export function MapScreen({
     return () => onImmersion?.(false);
   }, [view, onImmersion]);
 
+  /**
+   * Внутри зоны системная кнопка «Назад» Telegram выводит наружу. Своя кнопка
+   * выхода в углу остаётся: в браузере другой нет, а в Telegram привычнее
+   * нажать системную — иначе она закрывает всё приложение целиком.
+   */
+  useEffect(() => {
+    if (view !== 'inside') {
+      setBackButton(null);
+      return;
+    }
+    setBackButton(() => leaveZoneRef.current());
+    return () => setBackButton(null);
+  }, [view]);
+
   /** Тап по станции: шахта и банк — проваливаемся внутрь, остальные — панель. */
   function handleStation(id: string) {
     const cat = categories.find((c) => c.id === id);
@@ -323,6 +338,15 @@ export function MapScreen({
       toast(errorText(err));
     }
   }
+
+  /**
+   * Ссылка на выход из зоны — по ней его дёргает системная кнопка «Назад»
+   * Telegram, не пересоздавая обработчик на каждый тик таймера.
+   */
+  const leaveZoneRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    leaveZoneRef.current = leaveZone;
+  });
 
   /** Выныриваем обратно на карту (камера вернётся туда, откуда нырнули). */
   function leaveZone() {
@@ -650,7 +674,7 @@ export function MapScreen({
               onClick={leaveZone}
               aria-label={insideText.back}
               className="glass-dark pointer-events-auto absolute left-4 flex h-11 w-11 items-center justify-center !rounded-2xl text-white"
-              style={{ top: 'calc(14px + env(safe-area-inset-top))' }}
+              style={{ top: 'calc(14px + var(--safe-top))' }}
             >
               <ArrowLeftIcon />
             </motion.button>
@@ -658,7 +682,7 @@ export function MapScreen({
             {/* название станции и стадия зоны */}
             <div
               className="glass-dark pointer-events-none absolute right-4 max-w-[60%] px-3.5 py-2 text-right"
-              style={{ top: 'calc(14px + env(safe-area-inset-top))' }}
+              style={{ top: 'calc(14px + var(--safe-top))' }}
             >
               <p className="truncate font-display text-sm text-white">{insideCat.name}</p>
               <p className="text-[11px] text-white/60">
@@ -668,7 +692,7 @@ export function MapScreen({
 
             {/* часы и «Стоп» снизу; тянешь вверх — подробности */}
             <motion.div
-              className="pointer-events-auto absolute inset-x-0 bottom-0 px-4 pb-[calc(16px+env(safe-area-inset-bottom))]"
+              className="pointer-events-auto absolute inset-x-0 bottom-0 px-4 pb-[calc(16px+var(--safe-bottom))]"
               drag="y"
               dragConstraints={{ top: 0, bottom: 0 }}
               dragElastic={{ top: 0.35, bottom: 0 }}
@@ -806,7 +830,7 @@ export function MapScreen({
               onClick={() => setDetailsOpen(false)}
             />
             <motion.div
-              className="glass-dark fixed inset-x-0 bottom-0 z-40 mx-auto max-w-[430px] space-y-4 !rounded-b-none !rounded-t-[28px] p-5 pb-[calc(20px+env(safe-area-inset-bottom))]"
+              className="glass-dark fixed inset-x-0 bottom-0 z-40 mx-auto max-w-[430px] space-y-4 !rounded-b-none !rounded-t-[28px] p-5 pb-[calc(20px+var(--safe-bottom))]"
               initial={{ y: '100%' }}
               animate={{ y: 0 }}
               exit={{ y: '100%' }}

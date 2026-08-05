@@ -31,6 +31,7 @@
 import { useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
+import { LIVE } from './Baked';
 import { MAX_LEVEL } from '../lib/thresholds';
 import { Character3D } from './Character3D';
 import { SHELL_H, SHELL_NEAR, useSpread } from './interiorFrame';
@@ -343,7 +344,7 @@ function Fan({ position, rot = 0, active }: { position: [number, number, number]
         <cylinderGeometry args={[0.3, 0.3, 0.08, 16]} />
         <meshStandardMaterial color={METAL_D} metalness={0.5} roughness={0.5} />
       </mesh>
-      <group ref={blades} position={[0, 0, 0.05]}>
+      <group userData={LIVE} ref={blades} position={[0, 0, 0.05]}>
         {[0, 1, 2, 3].map((i) => (
           <mesh key={i} rotation={[0, 0, (i / 4) * Math.PI * 2]} position={[0, 0, 0]}>
             <boxGeometry args={[0.06, 0.44, 0.015]} />
@@ -430,7 +431,7 @@ function Conveyor({ x, from, to, active }: { x: number; from: number; to: number
         <boxGeometry args={[0.5, 0.07, len]} />
         <meshStandardMaterial color="#3b3f45" roughness={0.85} />
       </mesh>
-      <group ref={boxes}>
+      <group userData={LIVE} ref={boxes}>
         {[-0.3, 0.35, 1.0].map((k, i) => (
           <group key={i} position={[0, 0.68, (k - 0.35) * (len / 2)]}>
             <mesh castShadow>
@@ -493,7 +494,7 @@ function HangingBasket({ position, gold = false }: { position: [number, number, 
         <cylinderGeometry args={[0.008, 0.008, 0.4, 4]} />
         <meshStandardMaterial color={METAL_D} metalness={0.5} roughness={0.5} />
       </mesh>
-      <group ref={g} position={[0, -0.42, 0]}>
+      <group userData={LIVE} ref={g} position={[0, -0.42, 0]}>
         <mesh castShadow>
           <cylinderGeometry args={[0.18, 0.13, 0.16, 12]} />
           <meshStandardMaterial color="#a9743f" roughness={0.95} />

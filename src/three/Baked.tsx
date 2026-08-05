@@ -34,6 +34,7 @@
 import { useLayoutEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { refreshShadows } from './shadowFreeze';
 
 /**
  * Пометка «живое»: узел с таким userData и всё его поддерево спекание обходит
@@ -167,7 +168,15 @@ interface BakedProps {
   enabled?: boolean;
 }
 
-export function Baked({ children, deps = [], enabled = true }: BakedProps) {
+/**
+ * Общий выключатель спекания: `?bake=0` в адресе. Нужен, чтобы сравнивать
+ * картинку со склейкой и без неё в ОДНОЙ сборке — иначе разницу в тенях и
+ * освещении не отличить от разницы между двумя запусками.
+ */
+const BAKE_OFF =
+  typeof location !== 'undefined' && new URLSearchParams(location.search).get('bake') === '0';
+
+export function Baked({ children, deps = [], enabled = !BAKE_OFF }: BakedProps) {
   const src = useRef<THREE.Group>(null);
   const out = useRef<THREE.Group>(null);
   const hidden = useRef<THREE.Object3D[]>([]);
@@ -175,7 +184,11 @@ export function Baked({ children, deps = [], enabled = true }: BakedProps) {
   useLayoutEffect(() => {
     const source = src.current;
     const target = out.current;
-    if (!source || !target || !enabled) return;
+    if (!source || !target || !enabled) {
+      // без склейки состав сцены всё равно поменялся — тени пересчитать
+      refreshShadows();
+      return;
+    }
 
     // вернуть прошлую склейку в исходное состояние (React мог поменять props)
     for (const node of hidden.current) {
@@ -261,7 +274,11 @@ export function Baked({ children, deps = [], enabled = true }: BakedProps) {
       target.add(mesh);
     }
 
+    // состав сцены изменился — тени заморожены и сами не пересчитаются
+    refreshShadows();
+
     return () => {
+      refreshShadows();
       for (const m of made) {
         target.remove(m);
         m.geometry.dispose();

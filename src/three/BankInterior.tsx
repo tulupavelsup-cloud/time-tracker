@@ -33,6 +33,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
+import { LIVE } from './Baked';
 import { MAX_LEVEL } from '../lib/thresholds';
 import { Character3D } from './Character3D';
 import { chain, Layer, type Placed } from './Instanced';
@@ -631,7 +632,7 @@ function Chandelier({ y, z, s = 1, active }: { y: number; z: number; s?: number;
   });
   const arms = 6;
   return (
-    <group ref={g} position={[0, y, z]} scale={s}>
+    <group userData={LIVE} ref={g} position={[0, y, z]} scale={s}>
       {/* подвес */}
       <mesh position={[0, 0.42, 0]}>
         <cylinderGeometry args={[0.02, 0.02, 0.84, 6]} />
@@ -787,7 +788,7 @@ function Scales({ position, active }: { position: [number, number, number]; acti
         <cylinderGeometry args={[0.014, 0.018, 0.3, 8]} />
         <meshStandardMaterial color={BRASS} metalness={0.6} roughness={0.35} />
       </mesh>
-      <group ref={beam} position={[0, 0.31, 0]}>
+      <group userData={LIVE} ref={beam} position={[0, 0.31, 0]}>
         <mesh rotation={[0, 0, Math.PI / 2]}>
           <cylinderGeometry args={[0.01, 0.01, 0.44, 6]} />
           <meshStandardMaterial color={BRASS} metalness={0.65} roughness={0.3} />
@@ -992,7 +993,7 @@ function MoneyChangerDesk({ active }: { active: boolean }) {
             <cylinderGeometry args={[0.028, 0.032, 0.2, 8]} />
             <meshStandardMaterial color="#f2e6c8" roughness={0.85} />
           </mesh>
-          <mesh ref={flame} position={[0, 0.26, 0]}>
+          <mesh userData={LIVE} ref={flame} position={[0, 0.26, 0]}>
             <coneGeometry args={[0.03, 0.1, 7]} />
             <meshStandardMaterial color="#ffd98a" emissive="#ff9a2a" emissiveIntensity={2.4} roughness={0.4} />
           </mesh>
@@ -1238,7 +1239,7 @@ function WallClock({ position, sign = 1, active }: { position: [number, number, 
         <boxGeometry args={[0.014, 0.08, 0.01]} />
         <meshStandardMaterial color="#2f3540" />
       </mesh>
-      <group ref={pend} position={[0, -0.02, 0.07]}>
+      <group userData={LIVE} ref={pend} position={[0, -0.02, 0.07]}>
         <mesh position={[0, -0.1, 0]}>
           <boxGeometry args={[0.012, 0.2, 0.01]} />
           <meshStandardMaterial color={BRASS} metalness={0.6} roughness={0.4} />
@@ -1475,7 +1476,7 @@ function Treasure({ x, z, active }: { x: number; z: number; active: boolean }) {
       {/* Груда золота в проёме: невысокий курган и самородки поверх.
           Металличность низкая: в интерьере нет HDR-окружения, и «честный»
           металл темнеет до чёрного шара вместо золота. */}
-      <mesh castShadow position={[0, 0.34, 0]} scale={[1.35, 1, 1]}>
+      <mesh userData={LIVE} castShadow position={[0, 0.34, 0]} scale={[1.35, 1, 1]}>
         <coneGeometry args={[0.82, 0.68, 9]} />
         <meshStandardMaterial ref={glow} color={GOLD} emissive={GOLD_D} emissiveIntensity={0.8} metalness={0.2} roughness={0.4} flatShading />
       </mesh>
@@ -1496,7 +1497,7 @@ function Treasure({ x, z, active }: { x: number; z: number; active: boolean }) {
       <IngotPile position={[-0.42, 0.16, 0.34]} rot={-0.5} rows={2} />
       <CoinStack position={[0.08, 0.16, 0.42]} n={6} rot={0.2} />
       {/* монеты, парящие в сиянии */}
-      <group ref={halo} position={[0, 1.15, 0.1]}>
+      <group userData={LIVE} ref={halo} position={[0, 1.15, 0.1]}>
         {Array.from({ length: 7 }, (_, i) => {
           const a = (i / 7) * Math.PI * 2;
           return (
@@ -1610,11 +1611,11 @@ function ShuttleCart({ active, park, deep }: { active: boolean; park: number; de
   });
 
   return (
-    <group ref={g} position={[LANE_X, 0, park]}>
-      <group ref={full}>
+    <group userData={LIVE} ref={g} position={[LANE_X, 0, park]}>
+      <group userData={LIVE} ref={full}>
         <CartBody loaded />
       </group>
-      <group ref={empty} visible={false}>
+      <group userData={LIVE} ref={empty} visible={false}>
         <CartBody loaded={false} />
       </group>
     </group>
@@ -1640,7 +1641,7 @@ function Monitors({ active, count = 4 }: { active: boolean; count?: number }) {
             <boxGeometry args={[0.38, 0.3, 0.06]} />
             <meshStandardMaterial color="#2b3038" roughness={0.7} />
           </mesh>
-          <mesh position={[0, 0, 0.035]}>
+          <mesh userData={LIVE} position={[0, 0, 0.035]}>
             <boxGeometry args={[0.32, 0.24, 0.01]} />
             <meshStandardMaterial
               ref={(m) => (mats.current[i] = m)}
@@ -1747,7 +1748,7 @@ function TubeLine({ active, back, halfW }: { active: boolean; back: number; half
           </group>
         );
       })}
-      <mesh ref={pod} position={[0, 0, from]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh userData={LIVE} ref={pod} position={[0, 0, from]} rotation={[Math.PI / 2, 0, 0]}>
         <capsuleGeometry args={[0.075, 0.16, 6, 12]} />
         <meshStandardMaterial color={GOLD} emissive={GOLD_D} emissiveIntensity={0.4} metalness={0.55} roughness={0.35} />
       </mesh>
@@ -1841,7 +1842,7 @@ function CoinFly({ apiRef }: { apiRef: React.MutableRefObject<{ toss: () => void
 
   return (
     <group>
-      <mesh ref={coin} visible={false} castShadow>
+      <mesh userData={LIVE} ref={coin} visible={false} castShadow>
         <cylinderGeometry args={[0.08, 0.08, 0.022, 14]} />
         <meshStandardMaterial color={GOLD_L} emissive={GOLD_D} emissiveIntensity={0.5} metalness={0.6} roughness={0.3} />
       </mesh>

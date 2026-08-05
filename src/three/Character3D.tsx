@@ -21,6 +21,8 @@ import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { RoundedBox } from '@react-three/drei';
 import * as THREE from 'three';
+import { LIVE } from './Baked';
+import { ContactShadow } from './ContactShadow';
 
 /* ───────────────────────── палитра игрушки ───────────────────────── */
 
@@ -526,7 +528,13 @@ export function Character3D({
   const top = mine ? SHIRT : TEE;
 
   return (
-    <group ref={root} scale={scale}>
+    <group ref={root} userData={LIVE} scale={scale}>
+      {/* Тень героя. Настоящую он не отбрасывает: тени сцены заморожены (см.
+          shadowFreeze), а движущееся при заморозке обязано молчать — иначе его
+          тень отпечатается там, где он был в момент пересчёта. Пятно стоит
+          один прозрачный четырёхугольник и живёт вместе с ним. */}
+      <ContactShadow color={mine || bank ? '#141a20' : '#0f2c16'} opacity={mine || bank ? 0.5 : 0.6} />
+
       {/* ── ноги: длинные, как на рефе ── */}
       <Shoe x={-0.115} boot={mine} />
       <Shoe x={0.115} boot={mine} />
