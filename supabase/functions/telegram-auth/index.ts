@@ -38,8 +38,22 @@ Deno.serve(async (req) => {
     .eq('telegram_id', tgUser.id)
     .maybeSingle();
 
-  const email = `tg${tgUser.id}@telegram.local`;
+  /**
+   * Почта, по которой дальше выдаётся сессия.
+   *
+   * У заведённого нами аккаунта она служебная, но связку можно перевести на
+   * УЖЕ СУЩЕСТВУЮЩИЙ аккаунт с настоящей почтой — так к Telegram привязывают
+   * накопленную историю. Тогда и сессию надо выдавать по ЕГО почте: по
+   * служебной мы вернули бы токены совсем другого пользователя, и человек
+   * снова оказался бы в пустом аккаунте.
+   */
+  let email = `tg${tgUser.id}@telegram.local`;
   let userId = link?.user_id as string | undefined;
+
+  if (userId) {
+    const { data: existing } = await admin.auth.admin.getUserById(userId);
+    if (existing.user?.email) email = existing.user.email;
+  }
 
   // 2. Нет — заводим. Пароль случайный: входить им никто не будет, вход только
   //    по подписи Telegram.
