@@ -52,6 +52,23 @@ export async function closeStaleSession(nowMs: number = Date.now()): Promise<Ses
   return data as Session;
 }
 
+/**
+ * Все записи, пересекающие окно [fromMs, toMs): и засечённые таймером, и
+ * добавленные руками. Нужны статистике по дням — она режет их по локальной
+ * полуночи сама (lib/breakdown.ts), поэтому здесь никакой арифметики нет.
+ */
+export async function listSessions(fromMs: number, toMs: number): Promise<Session[]> {
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select('*')
+    .lt('started_at', new Date(toMs).toISOString())
+    .or(`ended_at.is.null,ended_at.gt.${new Date(fromMs).toISOString()}`)
+    .order('started_at', { ascending: true })
+    .limit(1000);
+  if (error) throw new Error(`listSessions: ${error.message}`);
+  return (data ?? []) as Session[];
+}
+
 /** Последняя завершённая сессия (для кнопки «Продолжить») или null. */
 export async function getLastSession(): Promise<Session | null> {
   const { data, error } = await supabase

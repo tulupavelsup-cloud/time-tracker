@@ -46,6 +46,7 @@ export const stopSession = IS_DEMO ? demo.stopSession : realSessions.stopSession
 export const getActiveSession = IS_DEMO ? demo.getActiveSession : realSessions.getActiveSession;
 export const getLastSession = IS_DEMO ? demo.getLastSession : realSessions.getLastSession;
 export const closeStaleSession = IS_DEMO ? demo.closeStaleSession : realSessions.closeStaleSession;
+export const listSessions = IS_DEMO ? demo.listSessions : realSessions.listSessions;
 
 export const addTime = IS_DEMO ? demo.addTime : realAdjust.addTime;
 export const subtractTime = IS_DEMO ? demo.subtractTime : realAdjust.subtractTime;

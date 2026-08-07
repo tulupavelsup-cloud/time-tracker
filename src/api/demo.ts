@@ -108,6 +108,16 @@ function seed(categoryId: string, taskId: string | null, daysAgo: number, startH
   });
 }
 
+/**
+ * Запись, ДОПИСАННАЯ РУКАМИ (как её создаёт правка времени: у неё есть note).
+ * Демо обязано показывать и такое время: на экране статистики оно считается
+ * отдельно от засечённого таймером — иначе непонятно, откуда взялись часы.
+ */
+function seedManual(categoryId: string, taskId: string | null, daysAgo: number, startHour: number, minutes: number) {
+  seed(categoryId, taskId, daysAgo, startHour, minutes);
+  sessions[sessions.length - 1].note = 'Добавлено вручную';
+}
+
 // Саморазвитие (шахта): ~31 ч — уровень «Империя» (показать шахту в силе)
 seed('c-mine', null, 0, 8, 60);
 seed('c-mine', null, 2, 7, 240);
@@ -141,6 +151,10 @@ seed('c-farm', null, 1, 18, 60);
 seed('c-farm', null, 3, 7, 90);
 seed('c-farm', null, 8, 19, 120);
 seed('c-farm', null, 15, 8, 150);
+// Дописанное руками — «забыл включить таймер»: видно на статистике отдельно
+seedManual('c-mine', null, 0, 6, 75);
+seedManual('c-corp', 't-eng', 3, 19, 60);
+seedManual('c-bank', 't-invest', 9, 6, 120);
 
 const delay = <T,>(v: T): Promise<T> => new Promise((r) => setTimeout(() => r(v), 60));
 
@@ -252,6 +266,15 @@ export async function archiveTask(id: string): Promise<Task> {
 
 export async function getActiveSession(): Promise<Session | null> {
   return delay(sessions.find((s) => s.ended_at === null) ?? null);
+}
+
+/** Записи, пересекающие окно [fromMs, toMs) — для разбора статистики по дням. */
+export async function listSessions(fromMs: number, toMs: number): Promise<Session[]> {
+  return delay(
+    inRange(fromMs, toMs, Date.now())
+      .map((s) => ({ ...s }))
+      .sort((a, b) => (a.started_at < b.started_at ? -1 : 1)),
+  );
 }
 
 export async function getLastSession(): Promise<Session | null> {

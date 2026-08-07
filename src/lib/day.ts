@@ -49,6 +49,12 @@ export function dayTitle(key: string, nowMs: number = Date.now()): string {
   return `${d.getDate()} ${MONTHS[d.getMonth()]}${sameYear ? '' : ` ${d.getFullYear()}`}`;
 }
 
+/** «7 августа» — дата как есть, без «сегодня/вчера». Для заголовка выбранного дня. */
+export function dateLabel(key: string): string {
+  const d = dayStart(key);
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+}
+
 /** «Сегодня» / «Вчера» / «29 июля» — то же с заглавной. null — «Все дни». */
 export function dayTitleCap(key: string | null, nowMs: number = Date.now()): string {
   if (key === null) return 'Все дни';
