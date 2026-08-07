@@ -37,6 +37,7 @@ interface TgWebApp {
   setHeaderColor?: (color: string) => void;
   setBackgroundColor?: (color: string) => void;
   onEvent: (event: string, cb: () => void) => void;
+  openLink?: (url: string, options?: { try_instant_view?: boolean }) => void;
 }
 
 function webApp(): TgWebApp | null {
@@ -114,6 +115,17 @@ export function setBackButton(handler: (() => void) | null) {
   } else {
     tg.BackButton.hide();
   }
+}
+
+/**
+ * Открыть внешнюю страницу. Внутри Telegram это делает он сам (окно поверх
+ * приложения), в браузере — обычная новая вкладка. Нужно для восстановления
+ * пароля: письмо со ссылкой в вебвью Mini App не откроешь.
+ */
+export function openExternal(url: string) {
+  const tg = webApp();
+  if (tg?.initData && tg.openLink) tg.openLink(url);
+  else window.open(url, '_blank', 'noopener');
 }
 
 /** Короткий отклик на нажатие — в Telegram он ожидаем, вне его молчим. */

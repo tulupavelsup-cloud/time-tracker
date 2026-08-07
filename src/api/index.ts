@@ -28,6 +28,8 @@ export const signIn = IS_DEMO ? demo.signIn : realAuth.signIn;
 export const signOut = IS_DEMO ? demo.signOut : realAuth.signOut;
 export const getUser = IS_DEMO ? demo.getUser : realAuth.getUser;
 export const onAuthStateChange = IS_DEMO ? demo.onAuthStateChange : realAuth.onAuthStateChange;
+export const requestPasswordReset = IS_DEMO ? demo.requestPasswordReset : realAuth.requestPasswordReset;
+export const setNewPassword = IS_DEMO ? demo.setNewPassword : realAuth.setNewPassword;
 
 export const getCategories = IS_DEMO ? demo.getCategories : realCategories.getCategories;
 export const createCategory = IS_DEMO ? demo.createCategory : realCategories.createCategory;

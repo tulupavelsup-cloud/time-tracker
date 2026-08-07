@@ -10,23 +10,25 @@
 import { useEffect, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { AnimatePresence, motion } from 'framer-motion';
-import { IS_DEMO, getUser, onAuthStateChange, signOut } from './api';
+import { IS_DEMO, getUser, onAuthStateChange } from './api';
+import { isRecoveryUrl, onPasswordRecovery } from './api/auth';
+import { saveTimezone } from './api/prefs';
 import { isTelegramOnlyAccount, signInWithTelegram } from './api/telegramAuth';
 import { isSupabaseConfigured } from './lib/supabase';
 import { IS_TMA, tgUserName } from './lib/telegram';
 import { NotConfigured } from './screens/NotConfigured';
 import { LoginScreen } from './screens/Login';
-import { TelegramAccountScreen } from './screens/TelegramAccount';
+import { NewPasswordScreen } from './screens/NewPassword';
+import { AccountScreen } from './screens/Account';
 import { MapScreen } from './screens/Map';
 import { StatsScreen } from './screens/Stats';
 import { CategoriesScreen } from './screens/Categories';
-import { ToastProvider, errorText, useToast } from './ui/Toast';
+import { ToastProvider, errorText } from './ui/Toast';
 import { Scene } from './ui/Scene';
 import { LoadingBlock } from './ui/Spinner';
 import {
   ChartIcon,
   FolderIcon,
-  LogoutIcon,
   MapIcon,
   UserIcon,
 } from './ui/Icons';
@@ -47,18 +49,9 @@ function initialTab(): Tab {
 }
 
 function Shell({ user, onAccount }: { user: User; onAccount: () => void }) {
-  const { toast } = useToast();
   const [tab, setTab] = useState<Tab>(initialTab);
   // Внутри шахты (Map.tsx) интерфейс уходит: остаётся только 3D и тонкий слой
   const [immersed, setImmersed] = useState(false);
-
-  async function handleSignOut() {
-    try {
-      await signOut();
-    } catch (err) {
-      toast(errorText(err));
-    }
-  }
 
   return (
     <div className="relative mx-auto flex min-h-dvh max-w-[430px] flex-col overflow-x-hidden">
@@ -88,13 +81,15 @@ function Shell({ user, onAccount }: { user: User; onAccount: () => void }) {
         </div>
       </motion.header>
 
-      {/* Выход — в правом нижнем углу карты, над таб-баром: наверху он
-          загораживал подписи станций, а внизу справа свободно. Только на карте:
-          на «Статистике» и «Категориях» плавающая кнопка легла бы поверх строк
-          списка и перехватывала бы тапы по их иконкам.
-          В Telegram на этом же месте — «аккаунт»: выходить там некуда (вход по
-          подписи Telegram, и «выход» означал бы мгновенный вход обратно), а вот
-          сказать «я уже вёл трекер вот под этой почтой» бывает нужно. */}
+      {/* «Аккаунт» — в правом нижнем углу карты, над таб-баром: наверху кнопка
+          загораживала подписи станций, а внизу справа свободно. Только на
+          карте: на «Статистике» и «Категориях» плавающая кнопка легла бы поверх
+          строк списка и перехватывала бы тапы по их иконкам.
+          За ней всё про аккаунт разом — почта, связь с Telegram, напоминания и
+          выход. Раньше здесь висел сразу выход, но в Telegram выходить некуда
+          (вход по подписи, «выход» означал бы мгновенный вход обратно), зато
+          нужно другое: настроить бота и сказать, под какой почтой вы вели
+          трекер раньше. */}
       {tab === 'home' && (
         <motion.div
           className="pointer-events-none fixed inset-x-0 z-30 mx-auto w-full max-w-[430px] px-4"
@@ -106,12 +101,12 @@ function Shell({ user, onAccount }: { user: User; onAccount: () => void }) {
             <motion.button
               type="button"
               whileTap={{ scale: 0.88 }}
-              onClick={() => (IS_TMA ? onAccount() : void handleSignOut())}
-              aria-label={IS_TMA ? 'Мой аккаунт' : 'Выйти из аккаунта'}
+              onClick={onAccount}
+              aria-label="Мой аккаунт"
               className="glass-dark pointer-events-auto flex h-10 w-10 items-center justify-center !rounded-2xl text-white/70"
               style={{ pointerEvents: immersed ? 'none' : 'auto' }}
             >
-              {IS_TMA ? <UserIcon /> : <LogoutIcon />}
+              <UserIcon />
             </motion.button>
           </div>
         </motion.div>
@@ -196,6 +191,8 @@ function AuthGate() {
   const [solo, setSolo] = useState(
     () => typeof window !== 'undefined' && window.localStorage.getItem(SOLO_KEY) === '1',
   );
+  // человек пришёл по ссылке из письма «забыли пароль» — встречаем формой
+  const [recovery, setRecovery] = useState(isRecoveryUrl);
 
   useEffect(() => {
     let cancelled = false;
@@ -239,6 +236,22 @@ function AuthGate() {
     };
   }, []);
 
+  // Метку в адресе почтовик может обрезать — слушаем и событие от Supabase
+  useEffect(() => onPasswordRecovery(() => setRecovery(true)), []);
+
+  /**
+   * Часовой пояс — в базу. Раньше его знал только браузер и присылал в каждый
+   * запрос статистики; серверу, который пишет в Telegram, он был неизвестен, и
+   * бот не мог ни промолчать ночью, ни подвести итог дня. Пишем при запуске и
+   * только если он изменился (см. api/prefs).
+   */
+  useEffect(() => {
+    if (!user || IS_DEMO) return;
+    void saveTimezone(user.id).catch(() => {
+      // не повод мешать человеку: в следующий запуск попробуем снова
+    });
+  }, [user]);
+
   if (user === undefined) {
     return (
       <div className="relative flex min-h-dvh items-center justify-center">
@@ -264,6 +277,24 @@ function AuthGate() {
   if (user === null) return <LoginScreen />;
 
   /**
+   * Пришли по ссылке из письма: сессия уже есть (её создала сама ссылка),
+   * поэтому старый пароль не нужен — сразу форма нового. Метку из адреса
+   * убираем, иначе перезагрузка снова показала бы форму.
+   */
+  if (recovery) {
+    return (
+      <NewPasswordScreen
+        onDone={() => {
+          setRecovery(false);
+          const url = new URL(window.location.href);
+          url.searchParams.delete('recovery');
+          window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+        }}
+      />
+    );
+  }
+
+  /**
    * Первый заход из Telegram: аккаунт служебный и пустой, а часы человека
    * лежат в том, что он завёл на сайте. Пока не спросишь — не узнаешь, поэтому
    * спрашиваем сразу, до карты: один раз почта с паролем — и Telegram
@@ -272,7 +303,7 @@ function AuthGate() {
   const needsAccount = IS_TMA && !IS_DEMO && isTelegramOnlyAccount(user) && !solo;
   if (account || needsAccount) {
     return (
-      <TelegramAccountScreen
+      <AccountScreen
         user={user}
         // после удачной привязки аккаунт уже не служебный — экран не вернётся
         onDone={() => setAccount(false)}

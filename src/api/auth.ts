@@ -28,6 +28,54 @@ export async function signIn(email: string, password: string): Promise<User> {
   return data.user;
 }
 
+/**
+ * Забыли пароль: письмо со ссылкой, по которой можно задать новый.
+ *
+ * Ссылка ведёт обратно в трекер с меткой `?recovery=1` — по ней приложение
+ * понимает, что человека надо встретить формой нового пароля, а не картой
+ * (см. AuthGate в App.tsx). Адрес должен быть в списке разрешённых:
+ * Supabase → Authentication → URL Configuration → Redirect URLs.
+ *
+ * Ошибку «такой почты нет» Supabase намеренно не возвращает: иначе по форме
+ * можно было бы перебором узнать, кто зарегистрирован. Поэтому и мы говорим
+ * одно и то же в обоих случаях — «письмо отправлено, если такая почта есть».
+ */
+export async function requestPasswordReset(email: string): Promise<void> {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/?recovery=1`,
+  });
+  if (error) throw new Error(`Не удалось отправить письмо: ${error.message}`);
+}
+
+/** Задать новый пароль. Работает, когда человек уже пришёл по ссылке из письма. */
+export async function setNewPassword(password: string): Promise<void> {
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) throw new Error(`Не удалось сменить пароль: ${error.message}`);
+}
+
+/**
+ * Пришли ли мы по ссылке из письма о смене пароля.
+ *
+ * Смотрим и на свою метку в адресе, и на событие от Supabase: метку человек
+ * может потерять (открыл ссылку, где почтовик обрезал параметры), а событие
+ * может прийти раньше, чем мы успеем подписаться. Порознь оба способа
+ * ненадёжны, вместе — достаточно.
+ */
+export function isRecoveryUrl(): boolean {
+  if (typeof window === 'undefined') return false;
+  const search = new URLSearchParams(window.location.search);
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  return search.get('recovery') === '1' || hash.get('type') === 'recovery';
+}
+
+/** Подписка на «человек пришёл менять пароль». Возвращает функцию отписки. */
+export function onPasswordRecovery(callback: () => void): () => void {
+  const { data } = supabase.auth.onAuthStateChange((event) => {
+    if (event === 'PASSWORD_RECOVERY') callback();
+  });
+  return () => data.subscription.unsubscribe();
+}
+
 /** Выход из аккаунта на этом устройстве. */
 export async function signOut(): Promise<void> {
   const { error } = await supabase.auth.signOut();

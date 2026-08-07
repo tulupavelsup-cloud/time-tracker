@@ -161,6 +161,12 @@ export async function getUser(): Promise<User | null> {
 export function onAuthStateChange(_cb: (user: User | null) => void): () => void {
   return () => {};
 }
+export async function requestPasswordReset(_email: string): Promise<void> {
+  return delay(undefined);
+}
+export async function setNewPassword(_password: string): Promise<void> {
+  return delay(undefined);
+}
 
 // ---------- categories ----------
 
