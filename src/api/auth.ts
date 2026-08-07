@@ -13,8 +13,11 @@ export async function signUp(email: string, password: string): Promise<User> {
     password,
     // Ссылка подтверждения в письме должна вести обратно в трекер,
     // а не на Site URL проекта (он общий с дашбордом и указывает не сюда).
-    // Адрес должен быть добавлен в Auth → URL Configuration → Redirect URLs.
-    options: { emailRedirectTo: window.location.origin },
+    // Адрес должен быть в списке Auth → URL Configuration → Redirect URLs,
+    // и там он записан как `.../**`. Косая черта в конце обязательна: origin
+    // отдаёт адрес БЕЗ неё, а под `/**` голый домен не подходит — Supabase
+    // молча заменил бы адрес на запасной, и человек ушёл бы в никуда.
+    options: { emailRedirectTo: `${window.location.origin}/` },
   });
   if (error) throw new Error(`Регистрация не удалась: ${error.message}`);
   if (!data.user) throw new Error('Регистрация не удалась: пользователь не создан');
