@@ -6,10 +6,16 @@
  * остальное живёт в самом трекере.
  *
  *   /start   — приветствие и кнопка «Открыть трекер»
+ *   /open    — та же кнопка, но без приветствия
  *   /status  — что идёт прямо сейчас и сколько уже накапало
  *   /stop    — остановить таймер
- *   /mute    — не напоминать о забытом таймере
+ *   /mute    — замолчать совсем: ни напоминаний, ни итога дня
  *   /unmute  — напоминать снова
+ *
+ * Те же слова понимаются и без косой черты: «стоп», «статус», «открыть»,
+ * «молчи». В чате с ботом человек пишет как человеку, а не команду из меню, —
+ * и «стоп» в ответ на напоминание должно останавливать таймер, а не выдавать
+ * справку (созвон №7).
  *
  * Кнопка «Остановить» под напоминанием (см. telegram-remind) приходит сюда же
  * callback-запросом.
@@ -90,17 +96,56 @@ async function stopFor(userId: string) {
 const NEED_LINK =
   'Сначала откройте трекер кнопкой ниже и войдите — после этого я смогу показывать таймер и напоминать о нём.';
 
+/**
+ * Слово человека → команда. Меню Telegram подсказывает команды с косой чертой,
+ * но в переписке их набирают редко: на «⏱ таймер идёт уже 4 часа» отвечают
+ * «стоп», а не «/stop». Без этой таблицы бот в ответ выдавал справку, и таймер
+ * продолжал идти — то есть ровно в тот момент, ради которого всё и писалось,
+ * он был бесполезен.
+ */
+const WORDS: Record<string, string> = {
+  стоп: '/stop',
+  стой: '/stop',
+  остановить: '/stop',
+  останови: '/stop',
+  хватит: '/stop',
+  статус: '/status',
+  идёт: '/status',
+  идет: '/status',
+  открыть: '/open',
+  открой: '/open',
+  трекер: '/open',
+  карта: '/open',
+  молчи: '/mute',
+  тихо: '/mute',
+  напоминай: '/unmute',
+  старт: '/start',
+};
+
+/** Команда из сообщения: и «/stop@bot», и просто «стоп». */
+function commandOf(text: string) {
+  const first = text.split(/[@\s,.!]/)[0].toLowerCase();
+  if (first.startsWith('/')) return first;
+  return WORDS[first.replace(/[«»"']/g, '')] ?? '';
+}
+
 async function handleCommand(chatId: number, telegramId: number, text: string) {
-  const command = text.split(/[@\s]/)[0].toLowerCase();
+  const command = commandOf(text);
   const link = await linkOf(telegramId);
   const open = await openButton();
 
   if (command === '/start') {
     await sendMessage(
       chatId,
-      '<b>Тайм-трекер</b>\n\nЗасекайте время по станциям — карта растёт вместе с вашими часами.\n\nЯ напомню, если таймер останется включённым надолго. Команды: /status, /stop, /mute.',
+      '<b>Тайм-трекер</b>\n\nЗасекайте время по станциям — карта растёт вместе с вашими часами.\n\nЯ напомню, если таймер останется включённым надолго, и вечером подведу итог дня.\n\nКоманды: /open — открыть, /status — что идёт, /stop — остановить, /mute — замолчать.',
       { reply_markup: open },
     );
+    return;
+  }
+
+  // Кнопку отдаём и без связки: она-то её и создаёт
+  if (command === '/open') {
+    await sendMessage(chatId, 'Открываю карту:', { reply_markup: open });
     return;
   }
 
@@ -135,19 +180,37 @@ async function handleCommand(chatId: number, telegramId: number, text: string) {
     return;
   }
 
+  /**
+   * «Замолчи» — значит замолчи совсем. Напоминание о забытом таймере и
+   * вечерний итог дня — две разные настройки, и /mute гасил только первую:
+   * человек просил тишины, а вечером всё равно получал сообщение. Теперь
+   * гаснут обе (созвон №7: «mute полностью отключает напоминалки, чтобы бот
+   * ничего не писал»).
+   *
+   * Обратно /unmute возвращает только напоминание о таймере: итог дня человек
+   * включал сам, и решать за него, что он снова его хочет, бот не должен —
+   * зато говорит, где включается.
+   */
   if (command === '/mute' || command === '/unmute') {
-    const enabled = command === '/unmute';
-    await admin.from('tt_telegram_links').update({ reminders_enabled: enabled }).eq('user_id', link.user_id);
+    const on = command === '/unmute';
+    await admin
+      .from('tt_telegram_links')
+      .update(on ? { reminders_enabled: true } : { reminders_enabled: false, summary_enabled: false })
+      .eq('user_id', link.user_id);
     await sendMessage(
       chatId,
-      enabled ? 'Буду напоминать о забытом таймере.' : 'Не буду напоминать. Вернуть — /unmute.',
+      on
+        ? 'Снова напоминаю о забытом таймере. Итог дня включается в приложении: кнопка с человечком на карте → «Аккаунт».'
+        : 'Молчу: ни про забытый таймер, ни про итог дня. Вернуть — /unmute.',
     );
     return;
   }
 
-  await sendMessage(chatId, 'Команды: /status — что идёт, /stop — остановить, /mute — не напоминать.', {
-    reply_markup: open,
-  });
+  await sendMessage(
+    chatId,
+    'Команды: /open — открыть трекер, /status — что идёт, /stop — остановить, /mute — замолчать, /unmute — напоминать снова.',
+    { reply_markup: open },
+  );
 }
 
 Deno.serve(async (req) => {
