@@ -35,6 +35,7 @@ import { useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { LIVE } from './Baked';
+import { KEY_LIGHT, LightBudget } from './lightBudget';
 import { MAX_LEVEL } from '../lib/thresholds';
 import { Character3D } from './Character3D';
 import { chain, Layer, type Placed } from './Instanced';
@@ -1307,37 +1308,16 @@ function FieldWindow({
 }
 
 /**
- * Тележка с бочками: возит их по проходу в служебный проём и возвращается
- * пустой. Смена «гружёная → пустая» прячется в тёмном проёме — тот же приём,
- * что у вагонетки в шахте и тележки в банке.
+ * Тележка с бочками: стоит гружёной у линии агрегатов.
+ *
+ * Раньше она ездила по проходу в служебный проём и обратно. На созвоне №7
+ * Тимур показал именно на такое движение в глубине кадра — «ездит просто как
+ * призрак». Теперь тележка стоит: проём в торце и так объясняет, куда уходят
+ * бочки, а неподвижная тележка уходит в общую склейку зала.
  */
-function Trolley({ active, park, deep, gold = false }: { active: boolean; park: number; deep: number; gold?: boolean }) {
-  const cart = useRef<THREE.Group>(null);
-  const cargo = useRef<THREE.Group>(null);
-  const wheels = useRef<THREE.Group>(null);
-  useFrame((s, dt) => {
-    if (!cart.current) return;
-    const CYCLE = 12;
-    const t = active ? (s.clock.elapsedTime % CYCLE) / CYCLE : 0;
-    let z = park;
-    let loaded = true;
-    if (t < 0.16) {
-      z = park; // грузится у линии агрегатов
-    } else if (t < 0.48) {
-      z = park + (deep - park) * ((t - 0.16) / 0.32);
-    } else if (t < 0.6) {
-      z = deep; // разгрузка в проёме
-      loaded = false;
-    } else if (t < 0.92) {
-      z = deep + (park - deep) * ((t - 0.6) / 0.32);
-      loaded = false;
-    }
-    cart.current.position.z = z;
-    if (cargo.current) cargo.current.visible = loaded;
-    if (wheels.current) wheels.current.rotation.x += dt * (active ? 5 : 0);
-  });
+function Trolley({ park, gold = false }: { park: number; gold?: boolean }) {
   return (
-    <group userData={LIVE} ref={cart} position={[LANE_X, 0, park]}>
+    <group position={[LANE_X, 0, park]}>
       <mesh castShadow receiveShadow position={[0, 0.24, 0]}>
         <boxGeometry args={[0.62, 0.1, 0.94]} />
         <meshStandardMaterial color={RUST_D} metalness={0.3} roughness={0.65} />
@@ -1360,7 +1340,7 @@ function Trolley({ active, park, deep, gold = false }: { active: boolean; park: 
           <meshStandardMaterial color={STEEL} metalness={0.5} roughness={0.5} />
         </mesh>
       ))}
-      <group userData={LIVE} ref={wheels}>
+      <group>
         {[-0.28, 0.28].map((x) =>
           [-0.34, 0.34].map((z) => (
             <mesh key={`${x}:${z}`} position={[x, 0.11, z]} rotation={[0, 0, Math.PI / 2]}>
@@ -1370,7 +1350,7 @@ function Trolley({ active, park, deep, gold = false }: { active: boolean; park: 
           )),
         )}
       </group>
-      <group userData={LIVE} ref={cargo} position={[0, 0.29, 0]}>
+      <group position={[0, 0.29, 0]}>
         <Drum position={[0, 0, -0.22]} rot={0.3} color={gold ? GOLD : '#5f7a5a'} oilTop />
         <Drum position={[0, 0, 0.24]} rot={-0.4} color={gold ? GOLD_D : '#7a5a4a'} oilTop />
       </group>
@@ -1597,6 +1577,9 @@ export function OilInterior({ level, active }: { level: number; active: boolean 
 
       <InteriorCamera level={s} />
       <Lights level={s} back={back} halfW={halfW} active={active} />
+      {/* потолок на число точечных источников — самая дорогая часть кадра в
+          зале (см. lightBudget) */}
+      <LightBudget max={3} deps={[s, active]} />
       <HallShell level={s} halfW={halfW} back={back} deckY={deckY} deckNear={deckNearFor(s)} spread={spread} />
 
       {/* ── линия насосных агрегатов: у ближнего работает герой ── */}
@@ -1682,7 +1665,7 @@ export function OilInterior({ level, active }: { level: number; active: boolean 
       {/* ── 4: операторская — пульт за стеклом, тележка и проём ── */}
       {s >= 4 && <Console position={[0.75, 0, -3.4]} rot={-0.45} active={active} gold={top} />}
       {s >= 4 && <GlassBox x={0.05} from={-2.7} to={-4.4} h={2.2} gold={top} />}
-      {s >= 4 && <Trolley active={active} park={CART_PARK} deep={back - 0.3} gold={top} />}
+      {s >= 4 && <Trolley park={CART_PARK} gold={top} />}
       {s >= 4 && <ServiceDoor back={back} halfW={halfW} active={active} />}
 
       {/* ── 5: диспетчерская — стена приборов и панорама промысла ── */}
@@ -1703,7 +1686,7 @@ export function OilInterior({ level, active }: { level: number; active: boolean 
       )}
 
       {/* «дежурный» свет от лампы у ближней кромки кадра */}
-      <pointLight position={[PUMP_X, 1.5, PUMP_Z0 - 0.2]} color="#ffd7a0" intensity={active ? 0.9 : 0.4} distance={4.5} decay={2} />
+      <pointLight userData={KEY_LIGHT} position={[PUMP_X, 1.5, PUMP_Z0 - 0.2]} color="#ffd7a0" intensity={active ? 0.9 : 0.4} distance={4.5} decay={2} />
     </>
   );
 }

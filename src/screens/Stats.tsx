@@ -584,7 +584,14 @@ export function StatsScreen() {
           период сворачиваются в одну подпись внизу карточки. */}
       {worked.length > 0 ? (
         <div className="glass-dark p-4">
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-white/50">По категориям</h2>
+          {/* Единица измерения стоит НАД столбцом, а не сноской под карточкой:
+              сноска «время в формате часы:минуты» висела последней строкой и
+              читалась недоделанным пояснением, хотя объясняла ровно один
+              столбец. Здесь она стоит там, куда и так смотрят. */}
+          <div className="mb-3 flex items-baseline gap-2">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-white/50">По категориям</h2>
+            <span className="ml-auto text-[10px] uppercase tracking-wide text-white/30">ч:мин</span>
+          </div>
           <ul className="space-y-3">
             {worked.map((row) => (
               <li key={row.id}>
@@ -618,7 +625,6 @@ export function StatsScreen() {
               Без времени за период: {idle.map((r) => r.name).join(', ')}.
             </p>
           )}
-          <p className="mt-1.5 text-[11px] text-white/30">Время в формате «часы:минуты».</p>
         </div>
       ) : (
         <div className="glass-dark p-5 text-center text-sm text-white/65">
@@ -631,7 +637,10 @@ export function StatsScreen() {
       {/* Разрез по задачам */}
       {taskRows.length > 0 && (
         <div className="glass-dark p-4">
-          <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-white/50">По задачам</h2>
+          <div className="mb-3 flex items-baseline gap-2">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-white/50">По задачам</h2>
+            <span className="ml-auto text-[10px] uppercase tracking-wide text-white/30">ч:мин</span>
+          </div>
           <ul className="space-y-2">
             {taskRows.map((row) => (
               <li key={row.id} className="flex items-center gap-2 text-sm text-white/90">

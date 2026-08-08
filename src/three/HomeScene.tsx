@@ -316,8 +316,13 @@ function DiveRig({ active, portal }: { active: boolean; portal: [number, number,
 /** Полное разрешение отрисовки на этом экране (Retina ограничиваем двойкой). */
 const FULL_DPR = typeof window === 'undefined' ? 1 : Math.min(window.devicePixelRatio || 1, 2);
 
+/** Ступени разрешения: полное → чуть ниже → пол. Ниже пола не опускаемся. */
+const DPR_STEPS = [FULL_DPR, Math.max(1.5, FULL_DPR * 0.85), Math.max(1.5, FULL_DPR * 0.75)].filter(
+  (v, i, a) => i === 0 || v < a[i - 1],
+);
+
 /**
- * Качество по факту, а не по догадке — но с ВЫСОКИМ полом.
+ * Качество по факту, а не по догадке — но с ВЫСОКИМ полом и БЕЗ качелей.
  *
  * Разрешение отрисовки — самый прямой рычаг цены кадра, и раньше на просадке
  * оно падало до 1: на телефоне с плотным экраном это значит, что кадр рисуется
@@ -326,15 +331,31 @@ const FULL_DPR = typeof window === 'undefined' ? 1 : Math.min(window.devicePixel
  * камера и мир не двигаются, и разница между 60 и 35 кадрами на ней не видна
  * вообще, тогда как мыло видно сразу. Поэтому на просадке отдаём частоту, а не
  * резкость: ниже 1.5 не опускаемся.
+ *
+ * И главное — только ВНИЗ (созвон №7). Раньше на просадке разрешение падало, а
+ * как только частота восстанавливалась — поднималось обратно; кадр от этого
+ * снова дорожал, и всё начиналось заново. Каждая такая перемена пересоздаёт
+ * буфер отрисовки, то есть сама стоит заметного рывка, и в тяжёлом зале это
+ * шло по кругу — ровно то самое «то идёт плавно, то еле-еле двигается».
+ * Теперь шаг вниз окончательный: приложение один раз находит разрешение, на
+ * котором этому телефону легко, и больше его не трогает.
  */
 function AdaptiveQuality() {
   const setDpr = useThree((s) => s.setDpr);
+  const step = useRef(0);
+  const down = () => {
+    if (step.current >= DPR_STEPS.length - 1) return;
+    step.current += 1;
+    setDpr(DPR_STEPS[step.current]);
+  };
   return (
     <PerformanceMonitor
-      onIncline={() => setDpr(FULL_DPR)}
-      onDecline={() => setDpr(Math.min(FULL_DPR, Math.max(1.5, FULL_DPR * 0.85)))}
+      onDecline={down}
       flipflops={3}
-      onFallback={() => setDpr(Math.min(FULL_DPR, 1.5))}
+      onFallback={() => {
+        step.current = DPR_STEPS.length - 1;
+        setDpr(DPR_STEPS[step.current]);
+      }}
     />
   );
 }

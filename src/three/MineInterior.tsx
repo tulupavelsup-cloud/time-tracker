@@ -33,6 +33,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { LIVE } from './Baked';
+import { KEY_LIGHT, LightBudget } from './lightBudget';
 import { MAX_LEVEL } from '../lib/thresholds';
 import { Character3D } from './Character3D';
 import { chain, Layer, type Placed } from './Instanced';
@@ -462,7 +463,7 @@ function Lights({ level, back, halfW }: { level: number; back: number; halfW: nu
       {/* мягкая заливка сверху-сзади: порода над сводом занимает верх кадра */}
       <directionalLight position={[-2, 11, 3]} intensity={0.5} color="#c3d3e6" />
       {/* мягкий свет на героя, чтобы он не тонул в породе */}
-      <pointLight position={[HERO[0] + 1.1, 2.3, HERO[2] + 1.7]} color="#ffe3bb" intensity={1.7} distance={7} decay={2} />
+      <pointLight userData={KEY_LIGHT} position={[HERO[0] + 1.1, 2.3, HERO[2] + 1.7]} color="#ffe3bb" intensity={1.7} distance={7} decay={2} />
       {/* холодное свечение жилы */}
       {crystalPower > 0 && (
         <pointLight position={[VEIN[0] + 0.5, VEIN[1] + 0.3, VEIN[2]]} color={crystalColor} intensity={crystalPower} distance={9} decay={2} />
@@ -542,60 +543,21 @@ function Rails({ from, to }: { from: number; to: number }) {
   );
 }
 
-/* Фазы челнока, секунды: стоит под погрузкой у героя → увозит руду в тоннель →
-   пропадает в темноте → возвращается пустой. */
-const CART_LOAD = 9;
-const CART_OUT = 4.6;
-const CART_DARK = 2;
-/** Плечо челнока на 1-м уровне: дальше зал глубже, и ход растягивается по времени. */
-const CART_RUN = 3.8;
-const ease = (u: number) => u * u * (3 - 2 * u);
-
 /**
- * Вагонетка-челнок: стоит рядом с героем под погрузкой, потом увозит руду в
- * тоннель и возвращается пустой. Из кадра не уезжает и нигде не «телепортится» —
- * её просто съедает темнота за устьем (раньше она доезжала до торца и мгновенно
- * возникала снова у камеры).
+ * Вагонетка под погрузкой: стоит на рельсах рядом с героем, в неё летит руда.
+ *
+ * Раньше она челноком уходила в тоннель и возвращалась пустой. На созвоне №7
+ * Тимур показал на неё пальцем: «на заднем фоне ездит просто как призрак».
+ * Так и есть — уезжая в темноту за устьем, она половину времени ползёт по
+ * заднему плану сама по себе и тянет взгляд на себя, хотя смотреть надо на
+ * героя. Теперь она просто стоит гружёной: рельсы и тоннель по-прежнему
+ * объясняют, куда девается руда, а зал стал спокойнее и дешевле — стоящая
+ * вагонетка уходит в общую склейку.
  */
-function ShuttleCart({ active, park, deep }: { active: boolean; park: number; deep: number }) {
-  const g = useRef<THREE.Group>(null);
-  const full = useRef<THREE.Group>(null);
-  const empty = useRef<THREE.Group>(null);
-  const t = useRef(0);
-  // ход в один конец: скорость челнока одна и та же на всех уровнях
-  const run = CART_OUT * Math.max(1, (park - deep) / CART_RUN);
-  const cycle = CART_LOAD + run * 2 + CART_DARK;
-
-  useFrame((_, dt) => {
-    if (active) t.current = (t.current + dt) % cycle;
-    const time = t.current;
-    let z = park;
-    let loaded = true;
-    if (time < CART_LOAD) {
-      // приехала пустой и понемногу наполняется рудой
-      loaded = time > CART_LOAD * 0.45;
-    } else if (time < CART_LOAD + run) {
-      z = park + (deep - park) * ease((time - CART_LOAD) / run);
-    } else if (time < CART_LOAD + run + CART_DARK) {
-      z = deep;
-      loaded = false;
-    } else {
-      z = deep + (park - deep) * ease((time - CART_LOAD - run - CART_DARK) / run);
-      loaded = false;
-    }
-    if (g.current) g.current.position.z = z;
-    if (full.current) full.current.visible = loaded;
-    if (empty.current) empty.current.visible = !loaded;
-  });
-
+function ShuttleCart({ park }: { park: number }) {
   return (
-    <group userData={LIVE} ref={g} position={[RAIL_X, 0.62, park]} scale={1.5}>
-      <group userData={LIVE} ref={full}>
-        <Cart ore />
-      </group>
-      <group userData={LIVE} ref={empty} visible={false}>
-        <Cart />
-      </group>
+    <group position={[RAIL_X, 0.62, park]} scale={1.5}>
+      <Cart ore />
     </group>
   );
 }
@@ -719,36 +681,35 @@ function Conveyor({ active, x, z }: { active: boolean; x: number; z: number }) {
   );
 }
 
-/** Лебёдка у левой стены: балка, канат и корзина, которая ходит вверх-вниз. */
-function Hoist({ active, x, z }: { active: boolean; x: number; z: number }) {
-  const basket = useRef<THREE.Group>(null);
-  const rope = useRef<THREE.Mesh>(null);
-  const wheel = useRef<THREE.Mesh>(null);
-  useFrame((s, dt) => {
-    const y = 1.05 + Math.sin(s.clock.elapsedTime * (active ? 0.55 : 0.16)) * 0.65;
-    if (basket.current) basket.current.position.y = y;
-    if (rope.current) {
-      const len = Math.max(0.1, 3.35 - y);
-      rope.current.scale.y = len;
-      rope.current.position.y = y + len / 2 + 0.2;
-    }
-    if (wheel.current && active) wheel.current.rotation.z += dt * 0.9;
-  });
+/**
+ * Лебёдка у левой стены: балка, канат и корзина с рудой.
+ *
+ * Корзина больше не ходит вверх-вниз (созвон №7). Тимур ткнул в неё прямо на
+ * показе — «что-то там болтается на верёвке»: движение это фоновое, взгляд
+ * оно уводит от героя, а стоит как всё остальное. Теперь лебёдка стоит с
+ * поднятой корзиной — картинка та же, а вместе с движением ушла и её цена:
+ * неподвижное уходит в общую склейку зала (см. Baked).
+ */
+const HOIST_Y = 1.5;
+
+function Hoist({ x, z }: { x: number; z: number }) {
+  // канат — от блока на балке до дужки корзины
+  const ropeLen = 3.35 - HOIST_Y;
   return (
     <group position={[x, 0, z]} scale={0.6} rotation={[0, Math.PI / 2, 0]}>
       <Timber position={[-0.75, 1.8, 0]} args={[0.2, 3.6, 0.2]} />
       <Timber position={[0.75, 1.8, 0]} args={[0.2, 3.6, 0.2]} />
       <Timber position={[0, 3.6, 0]} args={[1.9, 0.2, 0.2]} />
       <Timber position={[-0.75, 3.3, 0]} args={[0.7, 0.14, 0.14]} rot={[0, 0, -0.6]} />
-      <mesh userData={LIVE} ref={wheel} position={[0, 3.5, 0.16]} rotation={[Math.PI / 2, 0, 0]}>
+      <mesh position={[0, 3.5, 0.16]} rotation={[Math.PI / 2, 0, 0]}>
         <torusGeometry args={[0.2, 0.04, 8, 18]} />
         <meshStandardMaterial color="#7b7f88" metalness={0.6} roughness={0.4} />
       </mesh>
-      <mesh userData={LIVE} ref={rope} position={[0, 2.6, 0]}>
+      <mesh position={[0, HOIST_Y + ropeLen / 2 + 0.2, 0]} scale={[1, ropeLen, 1]}>
         <cylinderGeometry args={[0.02, 0.02, 1, 6]} />
         <meshStandardMaterial color="#c8b48a" roughness={0.9} />
       </mesh>
-      <group userData={LIVE} ref={basket} position={[0, 1.05, 0]}>
+      <group position={[0, HOIST_Y, 0]}>
         <mesh castShadow>
           <boxGeometry args={[0.7, 0.42, 0.7]} />
           <meshStandardMaterial color="#8a5a33" roughness={0.9} />
@@ -1173,6 +1134,9 @@ export function MineInterior({ level, active }: { level: number; active: boolean
 
       <InteriorCamera level={s} />
       <Lights level={s} back={back} halfW={halfW} />
+      {/* потолок на число точечных источников — самая дорогая часть кадра в
+          зале (см. lightBudget) */}
+      <LightBudget max={3} deps={[s, active]} />
       <CaveShell
         level={s}
         halfW={halfW}
@@ -1198,7 +1162,7 @@ export function MineInterior({ level, active }: { level: number; active: boolean
       {/* 1 — рельсы, устье тоннеля в торце и вагонетка-челнок */}
       {s >= 1 && <Rails from={NEAR_Z} to={railTo} />}
       {s >= 1 && <TunnelMouth back={back} />}
-      {s >= 1 && <ShuttleCart active={active} park={CART_SPOT[2]} deep={back - 0.6} />}
+      {s >= 1 && <ShuttleCart park={CART_SPOT[2]} />}
 
       {/* 0 — ящик с припасом: даже в норе кадр не должен быть пустым полом.
           Координата по x прибита к оси штрека, а не отмерена от стены: у самой
@@ -1218,7 +1182,7 @@ export function MineInterior({ level, active }: { level: number; active: boolean
         timberZs(back).map((z, i) => <TimberSet key={z} z={z} w={baseHalf * 2 - 0.35} h={2.85 - i * 0.2} />)}
       {/* лебёдка работает до 5-го уровня: там её место занимает балкон яруса.
           Стоит ПЕРЕД первой рамой — на её месте стойка проходила бы насквозь */}
-      {s >= 2 && s <= 4 && <Hoist active={active} x={left(0.5)} z={-2.5} />}
+      {s >= 2 && s <= 4 && <Hoist x={left(0.5)} z={-2.5} />}
       {s >= 2 &&
         spikes
           .slice(0, s >= 5 ? 6 : s >= 4 ? 5 : s >= 3 ? 4 : 2)

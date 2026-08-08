@@ -30,6 +30,7 @@ import { useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { LIVE } from './Baked';
+import { KEY_LIGHT, LightBudget } from './lightBudget';
 import { MAX_LEVEL } from '../lib/thresholds';
 import { Character3D } from './Character3D';
 import { Emblem, Rocket } from './Space3D';
@@ -974,24 +975,12 @@ function Section({
  * Кран-балка под перекрытием: мост ходит вдоль пролёта, каретка поперёк, крюк
  * опускается и поднимается. При стоящем таймере кран замирает над проходом.
  */
-function Crane({ y, halfW, from, to, active }: { y: number; halfW: number; from: number; to: number; active: boolean }) {
-  const bridge = useRef<THREE.Group>(null);
-  const trolley = useRef<THREE.Group>(null);
-  const hook = useRef<THREE.Group>(null);
-  const rope = useRef<THREE.Mesh>(null);
-  useFrame((s) => {
-    const t = s.clock.elapsedTime;
-    const u = active ? (t * 0.055) % 1 : 0.5;
-    const k = u < 0.5 ? u * 2 : 2 - u * 2; // туда и обратно
-    if (bridge.current) bridge.current.position.z = from + (to - from) * k;
-    if (trolley.current) trolley.current.position.x = Math.sin(t * (active ? 0.4 : 0.08)) * halfW * 0.45;
-    const drop = active ? 0.9 + Math.abs(Math.sin(t * 0.33)) * 1.1 : 1.1;
-    if (hook.current) hook.current.position.y = -drop;
-    if (rope.current) {
-      rope.current.scale.y = drop;
-      rope.current.position.y = -drop / 2;
-    }
-  });
+function Crane({ y, halfW, from, to }: { y: number; halfW: number; from: number; to: number }) {
+  // Кран стоит: мост посреди пролёта, крюк на своей высоте. Раньше он ездил
+  // вдоль цеха, а крюк болтался на канате — Тимур на созвоне №7 показал именно
+  // на это («болтается на верёвке»): движение фоновое, внимание тянет на себя,
+  // а стоит как всё остальное. Неподвижный кран уходит в склейку зала.
+  const HOOK_DROP = 1.1;
   return (
     <group position={[0, y, 0]}>
       {/* подкрановые рельсы вдоль стен */}
@@ -1001,7 +990,7 @@ function Crane({ y, halfW, from, to, active }: { y: number; halfW: number; from:
           <meshStandardMaterial color={STEEL_D} metalness={0.45} roughness={0.5} />
         </mesh>
       ))}
-      <group userData={LIVE} ref={bridge}>
+      <group position={[0, 0, (from + to) / 2]}>
         {/* мост */}
         <mesh castShadow position={[0, 0, 0]}>
           <boxGeometry args={[halfW * 2 - 0.3, 0.22, 0.2]} />
@@ -1011,16 +1000,16 @@ function Crane({ y, halfW, from, to, active }: { y: number; halfW: number; from:
           <boxGeometry args={[halfW * 2 - 0.3, 0.08, 0.32]} />
           <meshStandardMaterial color={STEEL_D} metalness={0.45} roughness={0.5} />
         </mesh>
-        <group userData={LIVE} ref={trolley}>
+        <group>
           <mesh castShadow position={[0, -0.16, 0]}>
             <boxGeometry args={[0.34, 0.2, 0.3]} />
             <meshStandardMaterial color="#4a5563" metalness={0.4} roughness={0.55} />
           </mesh>
-          <mesh userData={LIVE} ref={rope} position={[0, -0.8, 0]}>
+          <mesh position={[0, -HOOK_DROP / 2, 0]} scale={[1, HOOK_DROP, 1]}>
             <cylinderGeometry args={[0.012, 0.012, 1, 5]} />
             <meshStandardMaterial color="#3a424c" metalness={0.5} roughness={0.5} />
           </mesh>
-          <group userData={LIVE} ref={hook} position={[0, -1.1, 0]}>
+          <group position={[0, -HOOK_DROP, 0]}>
             <mesh castShadow>
               <boxGeometry args={[0.14, 0.1, 0.14]} />
               <meshStandardMaterial color={STEEL} metalness={0.55} roughness={0.4} />
@@ -1037,37 +1026,16 @@ function Crane({ y, halfW, from, to, active }: { y: number; halfW: number; from:
 }
 
 /**
- * Платформа-транспортёр: возит секцию по проходу в шлюз и возвращается пустой.
- * Смена «гружёная → пустая» прячется в тёмном проёме — тот же приём, что у
- * вагонетки в шахте и тележки в банке.
+ * Платформа-транспортёр: стоит с секцией у цеха.
+ *
+ * Раньше возила секцию в шлюз и возвращалась пустой — то самое «на заднем
+ * фоне ездит просто как призрак», на которое показал Тимур (созвон №7). Шлюз
+ * в торце и так объясняет, куда уходят секции, а стоящая платформа уходит в
+ * общую склейку зала.
  */
-function Transporter({ active, park, deep }: { active: boolean; park: number; deep: number }) {
-  const cart = useRef<THREE.Group>(null);
-  const cargo = useRef<THREE.Group>(null);
-  const wheels = useRef<THREE.Group>(null);
-  useFrame((s, dt) => {
-    if (!cart.current) return;
-    const CYCLE = 13;
-    const t = active ? (s.clock.elapsedTime % CYCLE) / CYCLE : 0;
-    let z = park;
-    let loaded = true;
-    if (t < 0.16) {
-      z = park; // грузится у цеха
-    } else if (t < 0.48) {
-      z = park + (deep - park) * ((t - 0.16) / 0.32);
-    } else if (t < 0.6) {
-      z = deep; // разгрузка в шлюзе
-      loaded = false;
-    } else if (t < 0.92) {
-      z = deep + (park - deep) * ((t - 0.6) / 0.32);
-      loaded = false;
-    }
-    cart.current.position.z = z;
-    if (cargo.current) cargo.current.visible = loaded;
-    if (wheels.current) wheels.current.rotation.x += dt * (active ? 5 : 0);
-  });
+function Transporter({ active, park }: { active: boolean; park: number }) {
   return (
-    <group userData={LIVE} ref={cart} position={[LANE_X, 0, park]}>
+    <group position={[LANE_X, 0, park]}>
       <mesh castShadow receiveShadow position={[0, 0.22, 0]}>
         <boxGeometry args={[0.66, 0.16, 1.0]} />
         <meshStandardMaterial color={SIGNAL} metalness={0.25} roughness={0.6} />
@@ -1081,7 +1049,7 @@ function Transporter({ active, park, deep }: { active: boolean; park: number; de
         <boxGeometry args={[0.4, 0.07, 0.02]} />
         <meshStandardMaterial color={SCREEN} emissive={SCREEN_EM} emissiveIntensity={active ? 1.1 : 0.3} roughness={0.3} />
       </mesh>
-      <group userData={LIVE} ref={wheels}>
+      <group>
         {[-0.3, 0.3].map((x) =>
           [-0.32, 0, 0.32].map((z) => (
             <mesh key={`${x}:${z}`} position={[x, 0.1, z]} rotation={[0, 0, Math.PI / 2]}>
@@ -1091,7 +1059,7 @@ function Transporter({ active, park, deep }: { active: boolean; park: number; de
           )),
         )}
       </group>
-      <group userData={LIVE} ref={cargo} position={[0, 0.32, 0]}>
+      <group position={[0, 0.32, 0]}>
         <Section position={[0, 0, 0]} rot={Math.PI / 2} len={0.86} r={0.24} />
       </group>
     </group>
@@ -1554,6 +1522,9 @@ export function SpaceInterior({ level, active }: { level: number; active: boolea
 
       <InteriorCamera level={s} />
       <Lights level={s} back={back} halfW={halfW} active={active} />
+      {/* потолок на число точечных источников — самая дорогая часть кадра в
+          зале (см. lightBudget) */}
+      <LightBudget max={3} deps={[s, active]} />
       <HallShell level={s} halfW={halfW} back={back} deckY={deckY} deckNear={deckNearFor(s)} spread={spread} />
 
       {/* ── линия верстаков: у ближнего работает герой ── */}
@@ -1597,11 +1568,11 @@ export function SpaceInterior({ level, active }: { level: number; active: boolea
         </group>
       )}
       {s >= 2 && s <= 3 && <Section position={[LANE_X, 0, -2.4]} rot={0.06} len={1.6} r={0.36} />}
-      {s >= 2 && <Crane y={deckY - 0.5} halfW={workHalf} from={-0.4} to={bayZ + 0.6} active={active} />}
+      {s >= 2 && <Crane y={deckY - 0.5} halfW={workHalf} from={-0.4} to={bayZ + 0.6} />}
       {s >= 2 && <Box position={[wallL(0.55), 0, -1.9]} s={0.36} rot={-0.3} color="#3f6fa8" />}
 
       {/* ── 3: ангар — платформа, шлюз, ракета в лесах у торца ── */}
-      {s >= 3 && <Transporter active={active} park={CART_PARK} deep={back - 0.4} />}
+      {s >= 3 && <Transporter active={active} park={CART_PARK} />}
       {s >= 3 && <Airlock back={back} halfW={halfW} active={active} open={top} />}
       {s === 3 && (
         <group>
@@ -1651,7 +1622,7 @@ export function SpaceInterior({ level, active }: { level: number; active: boolea
       )}
 
       {/* «дежурный» свет от ламп верстака у ближней кромки кадра */}
-      <pointLight position={[BENCH_X, 1.5, BENCH_Z0 - 0.2]} color="#ffe0b0" intensity={active ? 0.9 : 0.4} distance={4.5} decay={2} />
+      <pointLight userData={KEY_LIGHT} position={[BENCH_X, 1.5, BENCH_Z0 - 0.2]} color="#ffe0b0" intensity={active ? 0.9 : 0.4} distance={4.5} decay={2} />
     </>
   );
 }

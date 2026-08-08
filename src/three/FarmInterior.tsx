@@ -32,6 +32,7 @@ import { useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { LIVE } from './Baked';
+import { KEY_LIGHT, LightBudget } from './lightBudget';
 import { MAX_LEVEL } from '../lib/thresholds';
 import { Character3D } from './Character3D';
 import { SHELL_H, SHELL_NEAR, useSpread } from './interiorFrame';
@@ -482,19 +483,22 @@ function Harvest({ position, rot = 0, gold = false }: { position: [number, numbe
   );
 }
 
-/** Подвесная корзина с зеленью — заполняет верх кадра на старших уровнях. */
+/**
+ * Подвесная корзина с зеленью — заполняет верх кадра на старших уровнях.
+ *
+ * Раньше покачивалась на подвесе. Тимур на созвоне №7 показал ровно на такое
+ * фоновое движение — «болтается на верёвке»; висит она под потолком, у самой
+ * кромки кадра, и качание там только отвлекает. Теперь висит спокойно и
+ * уходит в общую склейку зала.
+ */
 function HangingBasket({ position, gold = false }: { position: [number, number, number]; gold?: boolean }) {
-  const g = useRef<THREE.Group>(null);
-  useFrame((s) => {
-    if (g.current) g.current.rotation.z = Math.sin(s.clock.elapsedTime * 0.7 + position[0]) * 0.05;
-  });
   return (
     <group position={position}>
       <mesh position={[0, -0.2, 0]}>
         <cylinderGeometry args={[0.008, 0.008, 0.4, 4]} />
         <meshStandardMaterial color={METAL_D} metalness={0.5} roughness={0.5} />
       </mesh>
-      <group userData={LIVE} ref={g} position={[0, -0.42, 0]}>
+      <group position={[0, -0.42, 0]}>
         <mesh castShadow>
           <cylinderGeometry args={[0.18, 0.13, 0.16, 12]} />
           <meshStandardMaterial color="#a9743f" roughness={0.95} />
@@ -836,7 +840,7 @@ function Lights({ level, back, halfW, active }: { level: number; back: number; h
       />
       {/* подсветка вглубь, чтобы дальняя часть не проваливалась в темноту */}
       <pointLight position={[0, 2.6, back * 0.45]} color="#eaf7e4" intensity={active ? 0.9 : 0.65} distance={12} decay={2} />
-      <pointLight position={[0, 2.2, 0.6]} color="#ffe8bd" intensity={0.75} distance={8} decay={2} />
+      <pointLight userData={KEY_LIGHT} position={[0, 2.2, 0.6]} color="#ffe8bd" intensity={0.75} distance={8} decay={2} />
     </>
   );
 }
@@ -891,6 +895,9 @@ export function FarmInterior({ level, active }: { level: number; active: boolean
 
       <InteriorCamera level={s} />
       <Lights level={s} back={back} halfW={halfW} active={active} />
+      {/* потолок на число точечных источников — самая дорогая часть кадра в
+          зале (см. lightBudget) */}
+      <LightBudget max={3} deps={[s, active]} />
       <Shell level={s} halfW={halfW} back={back} ceilY={ceilY} ceilNear={ceilNearFor(s)} spread={spread} active={active} />
 
       {/* герой у левой гряды: сажает и складывает урожай в ящик */}

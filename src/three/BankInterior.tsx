@@ -34,6 +34,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { LIVE } from './Baked';
+import { KEY_LIGHT, LightBudget } from './lightBudget';
 import { MAX_LEVEL } from '../lib/thresholds';
 import { Character3D } from './Character3D';
 import { chain, Layer, type Placed } from './Instanced';
@@ -737,7 +738,7 @@ function DeskLamp({ position, active }: { position: [number, number, number]; ac
         <sphereGeometry args={[0.045, 10, 8]} />
         <meshStandardMaterial color="#fff2cc" emissive="#ffc96e" emissiveIntensity={active ? 1.8 : 1} roughness={0.3} />
       </mesh>
-      <pointLight ref={light} position={[0, 0.16, 0.05]} color="#ffd79a" intensity={1.2} distance={3.4} decay={2} />
+      <pointLight userData={KEY_LIGHT} ref={light} position={[0, 0.16, 0.05]} color="#ffd79a" intensity={1.2} distance={3.4} decay={2} />
     </group>
   );
 }
@@ -1565,59 +1566,19 @@ function CartBody({ loaded }: { loaded: boolean }) {
   );
 }
 
-/* Фазы челнока, секунды: стоит под погрузкой у стойки → увозит мешки в
-   хранилище → пропадает в служебном проёме → возвращается пустой. */
-const CART_LOAD = 9;
-const CART_OUT = 4.6;
-const CART_DARK = 2;
-/** Плечо челнока на 1-м уровне: дальше зал глубже, и ход растягивается по времени. */
-const CART_RUN = 3.8;
-const ease = (u: number) => u * u * (3 - 2 * u);
-
 /**
- * Тележка-челнок: стоит у стойки под погрузкой, увозит мешки в хранилище и
- * возвращается пустой. Из кадра не уезжает и нигде не «телепортится» — её просто
- * съедает темнота служебного проёма.
+ * Тележка у стойки: стоит гружёной, мешки уезжают в хранилище «за кадром».
+ *
+ * Раньше она челноком уходила в служебный проём и возвращалась пустой. На
+ * созвоне №7 Тимур показал именно на такое движение — «на заднем фоне ездит
+ * просто как призрак»: взгляд уходит в глубину зала, хотя смотреть надо на
+ * кассира. Теперь тележка стоит: дорожка и проём по-прежнему объясняют, куда
+ * девается золото, а неподвижная тележка уходит в общую склейку зала.
  */
-function ShuttleCart({ active, park, deep }: { active: boolean; park: number; deep: number }) {
-  const g = useRef<THREE.Group>(null);
-  const full = useRef<THREE.Group>(null);
-  const empty = useRef<THREE.Group>(null);
-  const t = useRef(0);
-  const run = CART_OUT * Math.max(1, (park - deep) / CART_RUN);
-  const cycle = CART_LOAD + run * 2 + CART_DARK;
-
-  useFrame((_, dt) => {
-    if (active) t.current = (t.current + dt) % cycle;
-    const time = t.current;
-    let z = park;
-    let loaded = true;
-    if (time < CART_LOAD) {
-      // вернулась пустой и понемногу наполняется мешками; когда касса закрыта,
-      // тележка просто стоит гружёная — пустой короб читался серым столом
-      loaded = !active || time > CART_LOAD * 0.45;
-    } else if (time < CART_LOAD + run) {
-      z = park + (deep - park) * ease((time - CART_LOAD) / run);
-    } else if (time < CART_LOAD + run + CART_DARK) {
-      z = deep;
-      loaded = false;
-    } else {
-      z = deep + (park - deep) * ease((time - CART_LOAD - run - CART_DARK) / run);
-      loaded = false;
-    }
-    if (g.current) g.current.position.z = z;
-    if (full.current) full.current.visible = loaded;
-    if (empty.current) empty.current.visible = !loaded;
-  });
-
+function ShuttleCart({ park }: { park: number }) {
   return (
-    <group userData={LIVE} ref={g} position={[LANE_X, 0, park]}>
-      <group userData={LIVE} ref={full}>
-        <CartBody loaded />
-      </group>
-      <group userData={LIVE} ref={empty} visible={false}>
-        <CartBody loaded={false} />
-      </group>
+    <group position={[LANE_X, 0, park]}>
+      <CartBody loaded />
     </group>
   );
 }
@@ -1918,6 +1879,9 @@ export function BankInterior({ level, active }: { level: number; active: boolean
 
       <InteriorCamera level={s} />
       <Lights level={s} back={back} halfW={halfW} active={active} />
+      {/* потолок на число точечных источников — самая дорогая часть кадра в
+          зале (см. lightBudget) */}
+      <LightBudget max={3} deps={[s, active]} />
       <HallShell level={s} halfW={halfW} back={back} ceilY={ceilY} ceilNear={ceilNearFor(s)} spread={spread} />
       {s >= 3 && <Pilasters level={s} halfW={halfW} back={back} ceilY={ceilY} />}
       {/* боковые нефы широкого экрана: ряд колонн вдоль рабочей зоны */}
@@ -1951,7 +1915,7 @@ export function BankInterior({ level, active }: { level: number; active: boolean
       {/* ── 1: полка за спиной кассира, служебный проём, тележка и сейф ── */}
       {s >= 1 && <BackShelf position={[left(0.28), 0, HERO[2] - 1.5]} level={s} />}
       {s >= 1 && <ServiceDoor back={back} level={s} />}
-      {s >= 1 && <ShuttleCart active={active} park={CART_SPOT[2]} deep={back - 0.4} />}
+      {s >= 1 && <ShuttleCart park={CART_SPOT[2]} />}
       {s >= 1 && <Vault level={s} back={back} active={active} />}
 
       {/* ── 2: окно в торце, дорожка, скамья, часы на стене, припас у кассира ── */}

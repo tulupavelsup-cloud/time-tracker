@@ -30,6 +30,7 @@ import { useMemo, useRef } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { LIVE } from './Baked';
+import { KEY_LIGHT, LightBudget } from './lightBudget';
 import { MAX_LEVEL } from '../lib/thresholds';
 import { Character3D } from './Character3D';
 import { Logo } from './Corp3D';
@@ -1235,39 +1236,18 @@ function Box({ position, s = 0.32, rot = 0 }: { position: [number, number, numbe
 }
 
 /**
- * Робот-курьер: возит коробку по проходу в служебный проём и возвращается
- * пустым. Смена «гружёный → пустой» прячется в тёмном проёме торца — тот же
- * приём, что у вагонетки в шахте и тележки в банке.
+ * Робот-курьер с коробкой: стоит у стола под погрузкой.
+ *
+ * Раньше он катался по проходу в служебный проём и обратно. Тимур на созвоне
+ * №7 показал ровно на такое движение — «на заднем фоне ездит просто как
+ * призрак»: в глубине кадра само по себе ездит нечто, и взгляд уходит туда, а
+ * не на работу героя. Теперь робот стоит гружёным — проём в торце и так
+ * объясняет, куда всё уезжает, — и вместе со всем неподвижным уходит в
+ * склейку зала.
  */
-function CourierBot({ active, park, deep }: { active: boolean; park: number; deep: number }) {
-  const bot = useRef<THREE.Group>(null);
-  const cargo = useRef<THREE.Group>(null);
-  const wheels = useRef<THREE.Group>(null);
-  useFrame((s, dt) => {
-    if (!bot.current) return;
-    const CYCLE = 12;
-    const t = active ? (s.clock.elapsedTime % CYCLE) / CYCLE : 0;
-    let z = park;
-    let loaded = true;
-    if (t < 0.16) {
-      z = park; // грузится у стола
-    } else if (t < 0.48) {
-      const u = (t - 0.16) / 0.32;
-      z = park + (deep - park) * u;
-    } else if (t < 0.6) {
-      z = deep; // разгрузка в проёме
-      loaded = false;
-    } else if (t < 0.92) {
-      const u = (t - 0.6) / 0.32;
-      z = deep + (park - deep) * u;
-      loaded = false;
-    }
-    bot.current.position.z = z;
-    if (cargo.current) cargo.current.visible = loaded;
-    if (wheels.current) wheels.current.rotation.x += dt * (active ? 6 : 0);
-  });
+function CourierBot({ active, park }: { active: boolean; park: number }) {
   return (
-    <group userData={LIVE} ref={bot} position={[LANE_X, 0, park]}>
+    <group position={[LANE_X, 0, park]}>
       {/* платформа */}
       <mesh castShadow receiveShadow position={[0, 0.22, 0]}>
         <boxGeometry args={[0.54, 0.16, 0.74]} />
@@ -1282,7 +1262,7 @@ function CourierBot({ active, park, deep }: { active: boolean; park: number; dee
         <boxGeometry args={[0.3, 0.07, 0.02]} />
         <meshStandardMaterial color={SCREEN} emissive={SCREEN_EM} emissiveIntensity={active ? 1.1 : 0.3} roughness={0.3} />
       </mesh>
-      <group userData={LIVE} ref={wheels}>
+      <group>
         {[-0.24, 0.24].map((x) =>
           [-0.24, 0.24].map((z) => (
             <mesh key={`${x}:${z}`} position={[x, 0.1, z]} rotation={[0, 0, Math.PI / 2]}>
@@ -1292,7 +1272,7 @@ function CourierBot({ active, park, deep }: { active: boolean; park: number; dee
           )),
         )}
       </group>
-      <group userData={LIVE} ref={cargo} position={[0, 0.32, 0]}>
+      <group position={[0, 0.32, 0]}>
         <Box position={[0, 0, 0.06]} s={0.34} rot={0.2} />
         <Box position={[0.02, 0.34, 0.02]} s={0.22} rot={-0.4} />
       </group>
@@ -1413,6 +1393,9 @@ export function CorpInterior({ level, active }: { level: number; active: boolean
 
       <InteriorCamera level={s} />
       <Lights level={s} back={back} halfW={halfW} active={active} />
+      {/* потолок на число точечных источников — самая дорогая часть кадра в
+          зале (см. lightBudget) */}
+      <LightBudget max={3} deps={[s, active]} />
       <FloorShell level={s} halfW={halfW} back={back} ceilY={ceilY} ceilNear={ceilNearFor(s)} spread={spread} />
 
       {/* ковровая дорожка вдоль прохода */}
@@ -1506,7 +1489,7 @@ export function CorpInterior({ level, active }: { level: number; active: boolean
       {s >= 4 && <Reception position={[0.6, 0, back + 1.5]} rot={-0.3} active={active} gold={top} />}
       {s >= 4 && <Lounge position={[right(0.75), 0, -5.2]} rot={-1.5} />}
       {s >= 4 && <ServiceDoor back={back} halfW={halfW} />}
-      {s >= 4 && <CourierBot active={active} park={BOT_PARK} deep={back - 0.3} />}
+      {s >= 4 && <CourierBot active={active} park={BOT_PARK} />}
       {s >= 4 && s <= 4 && <Board position={[0.6, 2.15, back + 0.85]} active={active} gold={top} />}
 
       {/* ── 5: центр управления — стена дашбордов и панорама города ── */}
@@ -1532,6 +1515,7 @@ export function CorpInterior({ level, active }: { level: number; active: boolean
 
       {/* «дежурный» свет от экранов у ближней кромки кадра */}
       <pointLight
+        userData={KEY_LIGHT}
         position={[DESK_X, 1.5, DESK_Z0 - 0.2]}
         color={SCREEN}
         intensity={active ? 0.9 : 0.35}

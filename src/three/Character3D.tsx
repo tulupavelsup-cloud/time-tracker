@@ -21,7 +21,7 @@ import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { RoundedBox } from '@react-three/drei';
 import * as THREE from 'three';
-import { LIVE } from './Baked';
+import { Baked, LIVE } from './Baked';
 import { ContactShadow } from './ContactShadow';
 
 /* ───────────────────────── палитра игрушки ───────────────────────── */
@@ -535,7 +535,20 @@ export function Character3D({
           один прозрачный четырёхугольник и живёт вместе с ним. */}
       <ContactShadow color={mine || bank ? '#141a20' : '#0f2c16'} opacity={mine || bank ? 0.5 : 0.6} />
 
-      {/* ── ноги: длинные, как на рефе ── */}
+      {/*
+        Кукла собрана из шести десятков деталей, и до этой правки каждая из них
+        была отдельным поручением видеочипу. На карте это полбеды — там герой
+        один, — а в зале станции их трое-четверо (герой и артель), и на них
+        уходило БОЛЬШЕ ДВУХ СОТЕН вызовов из трёхсот. Отсюда и «внутри
+        подвисает, а снаружи крутится спокойно» (созвон №7).
+        Спекается кукла по СВОИМ подвижным частям: тело, левая рука, правая
+        рука, голова — внутри каждой детали друг относительно друга не двигают
+        ся, поэтому склейка не мешает анимации, а картинка остаётся ровно той же
+        (см. Baked). Наружная склейка зала до персонажа не добирается: он
+        помечен LIVE целиком, иначе замерла бы и анимация.
+      */}
+      <Baked deps={[mine, bank, tool]}>
+        {/* ── ноги: длинные, как на рефе ── */}
       <Shoe x={-0.115} boot={mine} />
       <Shoe x={0.115} boot={mine} />
       {[-0.115, 0.115].map((x) => (
@@ -625,23 +638,30 @@ export function Character3D({
         </group>
       )}
 
+      </Baked>
+
       {/* ── руки: тонкие, свисают до середины бедра ── */}
       <group ref={armL} position={[-0.205, 1.2, 0]}>
-        {/* короткий рукав заподлицо с торсом */}
-        <RoundedBox castShadow args={[0.112, 0.145, 0.225]} radius={0.052} smoothness={4} position={[-0.012, -0.045, 0]}>
-          <meshStandardMaterial color={top} roughness={mine ? 0.85 : 0.65} />
-        </RoundedBox>
-        <mesh castShadow position={[-0.03, -0.25, 0]} rotation={[0, 0, 0.09]}>
-          <capsuleGeometry args={[0.052, 0.19, 8, 14]} />
-          <meshStandardMaterial color={SKIN} roughness={0.5} />
-        </mesh>
-        <mesh castShadow position={[-0.044, -0.42, 0]} scale={[1, 1.05, 0.9]}>
-          <sphereGeometry args={[0.062, 16, 14]} />
-          <meshStandardMaterial color={SKIN} roughness={0.5} />
-        </mesh>
-        {/* кусок руды (в банке — монета) в кулаке: появляется только на броске */}
+        <Baked deps={[mine, bank]}>
+          {/* короткий рукав заподлицо с торсом */}
+          <RoundedBox castShadow args={[0.112, 0.145, 0.225]} radius={0.052} smoothness={4} position={[-0.012, -0.045, 0]}>
+            <meshStandardMaterial color={top} roughness={mine ? 0.85 : 0.65} />
+          </RoundedBox>
+          <mesh castShadow position={[-0.03, -0.25, 0]} rotation={[0, 0, 0.09]}>
+            <capsuleGeometry args={[0.052, 0.19, 8, 14]} />
+            <meshStandardMaterial color={SKIN} roughness={0.5} />
+          </mesh>
+          <mesh castShadow position={[-0.044, -0.42, 0]} scale={[1, 1.05, 0.9]}>
+            <sphereGeometry args={[0.062, 16, 14]} />
+            <meshStandardMaterial color={SKIN} roughness={0.5} />
+          </mesh>
+        </Baked>
+        {/* Кусок руды (в банке — монета) в кулаке: появляется только на броске.
+            В склейку не идёт — она не знает про visible и впечатала бы кусок
+            в кулак навсегда. */}
         <mesh
           ref={ore}
+          userData={LIVE}
           visible={false}
           castShadow
           position={[-0.052, -0.485, 0.03]}
@@ -660,28 +680,33 @@ export function Character3D({
         </mesh>
       </group>
       <group ref={armR} position={[0.205, 1.2, 0]}>
-        <RoundedBox castShadow args={[0.112, 0.145, 0.225]} radius={0.052} smoothness={4} position={[0.012, -0.045, 0]}>
-          <meshStandardMaterial color={top} roughness={mine ? 0.85 : 0.65} />
-        </RoundedBox>
-        <mesh castShadow position={[0.03, -0.25, 0]} rotation={[0, 0, -0.09]}>
-          <capsuleGeometry args={[0.052, 0.19, 8, 14]} />
-          <meshStandardMaterial color={SKIN} roughness={0.5} />
-        </mesh>
-        <mesh castShadow position={[0.044, -0.42, 0]} scale={[1, 1.05, 0.9]}>
-          <sphereGeometry args={[0.062, 16, 14]} />
-          <meshStandardMaterial color={SKIN} roughness={0.5} />
-        </mesh>
-        {tool === 'pick' && <Pick />}
+        <Baked deps={[mine, bank, tool]}>
+          <RoundedBox castShadow args={[0.112, 0.145, 0.225]} radius={0.052} smoothness={4} position={[0.012, -0.045, 0]}>
+            <meshStandardMaterial color={top} roughness={mine ? 0.85 : 0.65} />
+          </RoundedBox>
+          <mesh castShadow position={[0.03, -0.25, 0]} rotation={[0, 0, -0.09]}>
+            <capsuleGeometry args={[0.052, 0.19, 8, 14]} />
+            <meshStandardMaterial color={SKIN} roughness={0.5} />
+          </mesh>
+          <mesh castShadow position={[0.044, -0.42, 0]} scale={[1, 1.05, 0.9]}>
+            <sphereGeometry args={[0.062, 16, 14]} />
+            <meshStandardMaterial color={SKIN} roughness={0.5} />
+          </mesh>
+          {tool === 'pick' && <Pick />}
+        </Baked>
       </group>
 
-      {/* ── шея (видна между воротом и подбородком) и голова ── */}
+      {/* ── шея (видна между воротом и подбородком) и голова ──
+          Шея одна и склейки не просит: один меш склеивается сам в себя. */}
       <mesh castShadow position={[0, 1.325, 0]}>
         <cylinderGeometry args={[0.058, 0.07, 0.16, 16]} />
         <meshStandardMaterial color={SKIN_DARK} roughness={0.5} />
       </mesh>
       <group ref={head} position={[0, 1.595, 0]}>
-        <Head />
-        <Goggles />
+        <Baked deps={[mine, bank]}>
+          <Head />
+          <Goggles />
+        </Baked>
       </group>
     </group>
   );
