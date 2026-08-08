@@ -26,9 +26,167 @@
       href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=Unbounded:wght@300;400;500;600;700&display=swap"
       rel="stylesheet"
     />
+
+    <!--
+      Экран загрузки (созвон №7).
+
+      До этой правки первые секунды человек смотрел в БЕЛЫЙ экран: разметка
+      пустая, стили и код приложения ещё едут по сети. В Telegram это особенно
+      обидно — Mini App открывается поверх чата, кнопки «обновить» у человека
+      нет, и белизну не отличить от зависшего приложения. Тимур прямо просил:
+      «можно не белый экран, а какой-то… либо загрузку какую-то, либо подпись
+      типа „перезайдите“».
+
+      Поэтому заставка живёт ПРЯМО В РАЗМЕТКЕ, а не в React: она видна с первого
+      кадра, ещё до того, как загрузился хоть один файл приложения, и остаётся,
+      даже если код не доедет вовсе. Всё нарисовано своим css — ни картинок, ни
+      шрифтов, ни запросов: то, что показывают вместо не загрузившегося, не
+      должно само зависеть от загрузки.
+
+      Цвета — те же, что на карте (см. three/worldPalette): небо сверху, трава
+      снизу. Переход к приложению получается незаметным, а не вспышкой.
+    -->
+    <style>
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        padding: 24px;
+        text-align: center;
+        font-family: 'Golos Text', system-ui, -apple-system, 'Segoe UI', sans-serif;
+        color: #fff;
+        background: linear-gradient(178deg, #bfe6ff 0%, #cfe8d6 22%, #59a836 40%, #4b9130 72%, #3d7d25 100%);
+        transition: opacity 0.35s ease;
+      }
+      /* приложение отрисовалось — заставка растворяется и убирается из разметки */
+      #boot.gone {
+        opacity: 0;
+        pointer-events: none;
+      }
+      /* Кружок с бегущей по нему меткой: одна css-анимация поворота, ничего
+         больше. Тяжёлого здесь быть не должно — заставка показывается ровно
+         тогда, когда телефону и так тяжело. */
+      #boot .ring {
+        position: relative;
+        width: 62px;
+        height: 62px;
+        border-radius: 50%;
+        border: 3px solid rgba(255, 255, 255, 0.28);
+        animation: boot-spin 1.4s linear infinite;
+      }
+      #boot .ring::after {
+        content: '';
+        position: absolute;
+        top: -8px;
+        left: 50%;
+        width: 14px;
+        height: 14px;
+        margin-left: -7px;
+        border-radius: 50%;
+        background: #bef264;
+        box-shadow: 0 2px 8px rgba(3, 32, 12, 0.35);
+      }
+      @keyframes boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      /* кому анимация мешает — системная настройка это и говорит */
+      @media (prefers-reduced-motion: reduce) {
+        #boot .ring {
+          animation-duration: 4s;
+        }
+      }
+      #boot .title {
+        font-family: 'Unbounded', 'Golos Text', system-ui, sans-serif;
+        font-size: 17px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        text-shadow: 0 2px 10px rgba(3, 32, 12, 0.35);
+      }
+      #boot .note {
+        max-width: 260px;
+        font-size: 13px;
+        line-height: 1.45;
+        color: rgba(255, 255, 255, 0.85);
+        text-shadow: 0 1px 6px rgba(3, 32, 12, 0.35);
+      }
+      /* Подсказка и кнопка появляются, только если загрузка затянулась */
+      #boot .late {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+      }
+      #boot.slow .late {
+        display: flex;
+      }
+      #boot button {
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        border-radius: 999px;
+        background: rgba(6, 36, 24, 0.5);
+        padding: 10px 20px;
+        font: inherit;
+        font-size: 14px;
+        font-weight: 600;
+        color: #fff;
+        cursor: pointer;
+      }
+    </style>
   </head>
   <body>
+    <div id="boot">
+      <div class="ring"></div>
+      <div class="title">Тайм-трекер</div>
+      <div class="note">Собираем карту…</div>
+      <div class="late">
+        <div class="note">
+          Что-то долго — похоже, связь плохая.<br />Закройте приложение и откройте снова из бота.
+        </div>
+        <button type="button" id="boot-retry">Загрузить заново</button>
+      </div>
+    </div>
     <div id="root"></div>
+
+    <!--
+      Сторож заставки. Обычный путь — приложение отрисовалось и само сняло
+      заставку (см. main.tsx). Этот код нужен для второго случая: код НЕ доехал
+      (сеть отвалилась, файл не отдался) и снимать заставку некому. Тогда через
+      семь секунд под кружком появляется человеческое объяснение и кнопка.
+
+      Кнопка перезагружает страницу с новой меткой в адресе: в webview Telegram
+      обычная перезагрузка может снова взять страницу из кэша — ту же самую,
+      которая только что не открылась.
+    -->
+    <script>
+      (function () {
+        var boot = document.getElementById('boot');
+        var slow = setTimeout(function () {
+          if (boot) boot.classList.add('slow');
+        }, 7000);
+        // приложение отрисовалось — сторож больше не нужен
+        window.__bootDone = function () {
+          clearTimeout(slow);
+        };
+        var retry = document.getElementById('boot-retry');
+        if (retry) {
+          retry.addEventListener('click', function () {
+            var url = new URL(window.location.href);
+            url.searchParams.set('r', String(Date.now()));
+            window.location.replace(url.toString());
+          });
+        }
+        // не загрузился сам код приложения — ждать семь секунд незачем
+        window.addEventListener('error', function (e) {
+          if (e.target && e.target.tagName === 'SCRIPT' && boot) boot.classList.add('slow');
+        }, true);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

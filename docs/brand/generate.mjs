@@ -67,8 +67,14 @@ const stone = (x, y, r) =>
   `<circle cx="${f1(x)}" cy="${f1(y)}" r="${f1(r)}" fill="#8a9a86"/>` +
   `<path d="M ${f1(x - r)} ${f1(y)} a ${f1(r)} ${f1(r)} 0 0 1 ${f1(r)} ${f1(-r)} l 0 ${f1(r)} z" fill="#a9b8a4"/>`;
 
-const head = (extra = '') => `<svg xmlns="http://www.w3.org/2000/svg" width="${S}" height="${S}" viewBox="0 0 ${S} ${S}">
-<defs>
+/**
+ * Шапка картинки. `round` — радиус скругления углов: для аватарки бота он не
+ * нужен (Telegram и так обрезает кружком), а вот иконке приложения нужен —
+ * в браузерной вкладке и в списке PWA её никто не обрезает, и квадрат со
+ * срезанными углами там выглядит как чужеродная плашка.
+ */
+const head = (extra = '', round = 0) => `<svg xmlns="http://www.w3.org/2000/svg" width="${S}" height="${S}" viewBox="0 0 ${S} ${S}">
+<defs>${round ? `<clipPath id="round"><rect width="${S}" height="${S}" rx="${round}"/></clipPath>` : ''}
   <radialGradient id="sky" cx="32%" cy="20%" r="86%">
     <stop offset="0" stop-color="#5cab63"/>
     <stop offset="0.5" stop-color="#2a7a47"/>
@@ -87,9 +93,12 @@ const head = (extra = '') => `<svg xmlns="http://www.w3.org/2000/svg" width="${S
   </filter>
   ${extra}
 </defs>
-<rect width="${S}" height="${S}" fill="url(#sky)"/>`;
+${round ? `<g clip-path="url(#round)">` : ''}<rect width="${S}" height="${S}" fill="url(#sky)"/>`;
 
 const vignette = `<rect width="${S}" height="${S}" fill="url(#vig)"/>`;
+
+/** Хвост картинки — виньетка и закрытие скругляющей обёртки, если она была. */
+const tail = (round = 0) => `${vignette}${round ? '</g>' : ''}</svg>`;
 const vigDef = `<radialGradient id="vig" cx="50%" cy="46%" r="72%">
     <stop offset="0.62" stop-color="#000" stop-opacity="0"/>
     <stop offset="1" stop-color="#000" stop-opacity="0.32"/>
@@ -139,10 +148,10 @@ function islandClock() {
 }
 
 // ── Б. Перекрёсток ──────────────────────────────────────────────────────────
-function crossroads() {
+function crossroads(round = 0) {
   const cy = 258;
   const R = 186;
-  let s = head(vigDef + `<clipPath id="isle"><polygon points="${poly(CX, cy, R, 12, 0.13)}"/></clipPath>`);
+  let s = head(vigDef + `<clipPath id="isle"><polygon points="${poly(CX, cy, R, 12, 0.13)}"/></clipPath>`, round);
   s += `<ellipse cx="${CX}" cy="${cy + 74}" rx="215" ry="72" fill="#062d1a" opacity="0.5" filter="url(#soft)"/>`;
   s += `<polygon points="${poly(CX, cy + 16, R + 26, 12, 0.26)}" fill="${WATER}"/>`;
   s += `<polygon points="${poly(CX, cy + 6, R + 12, 12)}" fill="${SAND}"/>`;
@@ -170,7 +179,7 @@ function crossroads() {
   s += `<ellipse cx="${CX + 6}" cy="${py + 30}" rx="34" ry="12" fill="#5c4a22" opacity="0.32"/>`;
   s += `<path d="M ${CX} ${py + 30} c -26 -34 -40 -52 -40 -72 a 40 40 0 0 1 80 0 c 0 20 -14 38 -40 72 z" fill="url(#lime)" stroke="${NIGHT}" stroke-width="7" stroke-linejoin="round"/>`;
   s += `<circle cx="${CX}" cy="${py - 44}" r="15" fill="${NIGHT}"/>`;
-  return s + vignette + '</svg>';
+  return s + tail(round);
 }
 
 // ── В. Секундомер ───────────────────────────────────────────────────────────
@@ -231,6 +240,18 @@ const files = {
   'bot-c-sekundomer.svg': stopwatch(),
 };
 for (const [name, svg] of Object.entries(files)) writeFileSync(`${OUT}/${name}`, svg);
+
+/**
+ * Иконка приложения — та же картинка, что на боте (созвон №7).
+ *
+ * Раньше на главном экране телефона и во вкладке браузера жили столбики
+ * статистики, нарисованные ещё до карты, а в Telegram — перекрёсток: одно
+ * приложение с двумя лицами. Теперь лицо одно. У иконки углы скруглены: её,
+ * в отличие от аватарки бота, никто не обрезает кружком.
+ *
+ * PNG-размеры снимаются с этой же картинки — `node scripts/gen-icons.mjs`.
+ */
+writeFileSync(`${OUT}/../../public/favicon.svg`, crossroads(115));
 
 const names = Object.keys(files);
 const preview = `<!doctype html><meta charset="utf-8"><style>
